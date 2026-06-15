@@ -1,0 +1,13 @@
+{
+  "name": "microbe-war-frontend",
+  "version": "1.0.0",
+  "description": "Microbe War Multiplayer Strategy Game Frontend",
+  "scripts": {
+    "build": "tsc && mkdir -p dist/styles && cp src/*.html dist/ 2>/dev/null; cp src/styles/*.css dist/styles/ 2>/dev/null; true",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.2.2"
+  }
+}

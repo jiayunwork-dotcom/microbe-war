@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>微生物战争 - Microbe War</title>
+    <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+    <div id="app">
+        <div id="lobby-screen" class="screen active">
+            <div class="lobby-container">
+                <h1 class="game-title">🦠 微生物战争</h1>
+                <p class="game-subtitle">Microbe War - 培养皿领地争夺策略游戏</p>
+
+                <div class="lobby-content">
+                    <div class="lobby-section">
+                        <h2>创建房间</h2>
+                        <div class="form-group">
+                            <label>玩家名称</label>
+                            <input type="text" id="player-name-create" placeholder="输入你的名字" maxlength="12">
+                        </div>
+                        <div class="form-group">
+                            <label>选择菌种</label>
+                            <select id="microbe-type-create">
+                                <option value="bacteria">🦠 细菌 - 繁殖快，防御弱</option>
+                                <option value="fungi">🍄 真菌 - 移动慢，生物膜防御</option>
+                                <option value="protozoa">🦠 原生动物 - 吞噬小型菌落</option>
+                                <option value="phage">☠️ 噬菌体 - 注入使目标死亡</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>房间名称</label>
+                            <input type="text" id="room-name-create" placeholder="房间名称" maxlength="20">
+                        </div>
+                        <button id="btn-create-room" class="btn btn-primary">创建房间</button>
+                    </div>
+
+                    <div class="lobby-section">
+                        <h2>房间列表</h2>
+                        <div id="room-list" class="room-list">
+                            <div class="loading-text">加载房间列表...</div>
+                        </div>
+                        <button id="btn-refresh-rooms" class="btn btn-secondary">刷新列表</button>
+                    </div>
+
+                    <div class="lobby-section">
+                        <h2>加入房间</h2>
+                        <div class="form-group">
+                            <label>玩家名称</label>
+                            <input type="text" id="player-name-join" placeholder="输入你的名字" maxlength="12">
+                        </div>
+                        <div class="form-group">
+                            <label>选择菌种</label>
+                            <select id="microbe-type-join">
+                                <option value="bacteria">🦠 细菌 - 繁殖快，防御弱</option>
+                                <option value="fungi">🍄 真菌 - 移动慢，生物膜防御</option>
+                                <option value="protozoa">🦠 原生动物 - 吞噬小型菌落</option>
+                                <option value="phage">☠️ 噬菌体 - 注入使目标死亡</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>房间ID</label>
+                            <input type="text" id="room-id-join" placeholder="输入房间ID">
+                        </div>
+                        <button id="btn-join-room" class="btn btn-primary">加入房间</button>
+                    </div>
+                </div>
+
+                <div id="lobby-message" class="lobby-message"></div>
+            </div>
+        </div>
+
+        <div id="waiting-screen" class="screen">
+            <div class="waiting-container">
+                <h1>等待玩家加入</h1>
+                <div class="room-info">
+                    <p>房间ID: <span id="waiting-room-id">-</span></p>
+                    <p>当前玩家: <span id="waiting-player-count">0</span> / 6</p>
+                </div>
+                <div id="waiting-players" class="waiting-players"></div>
+                <div class="waiting-actions">
+                    <button id="btn-start-game" class="btn btn-primary btn-large" style="display:none;">开始游戏</button>
+                    <button id="btn-leave-waiting" class="btn btn-secondary">离开房间</button>
+                </div>
+                <p class="waiting-hint">等待房主开始游戏，或观战模式加入</p>
+            </div>
+        </div>
+
+        <div id="game-screen" class="screen">
+            <div class="game-container">
+                <div class="game-header">
+                    <div class="turn-info">
+                        <span class="turn-label">回合</span>
+                        <span id="current-turn" class="turn-value">1</span>
+                        <span class="turn-separator">/</span>
+                        <span class="turn-max">40</span>
+                    </div>
+                    <div class="game-status" id="game-status">准备中...</div>
+                    <div class="header-actions">
+                        <button id="btn-spectate-toggle" class="btn btn-small">切换观战</button>
+                        <button id="btn-leave-game" class="btn btn-small btn-danger">离开游戏</button>
+                    </div>
+                </div>
+
+                <div class="game-main">
+                    <div class="dish-container">
+                        <canvas id="dish-canvas" width="600" height="600"></canvas>
+                        <div id="dish-overlay" class="dish-overlay"></div>
+                    </div>
+
+                    <div class="side-panel">
+                        <div class="panel-section">
+                            <h3>玩家领地</h3>
+                            <div id="player-stats" class="player-stats"></div>
+                        </div>
+
+                        <div class="panel-section">
+                            <h3>我的操作</h3>
+                            <div class="action-panel">
+                                <div class="action-buttons">
+                                    <button id="btn-action-spread" class="btn-action active" data-action="spread">
+                                        <span class="action-icon">🌱</span>
+                                        <span class="action-label">扩散</span>
+                                    </button>
+                                    <button id="btn-action-attack" class="btn-action" data-action="attack">
+                                        <span class="action-icon">⚔️</span>
+                                        <span class="action-label">攻击</span>
+                                    </button>
+                                    <button id="btn-action-evolve" class="btn-action" data-action="evolve">
+                                        <span class="action-icon">🧬</span>
+                                        <span class="action-label">进化</span>
+                                    </button>
+                                </div>
+                                <div class="selected-info" id="selected-info">点击培养皿选择菌落</div>
+                            </div>
+                        </div>
+
+                        <div class="panel-section">
+                            <h3>提交回合</h3>
+                            <button id="btn-submit-turn" class="btn btn-primary btn-large btn-full">结束回合</button>
+                            <div class="submit-progress">
+                                <div id="submit-status">等待提交...</div>
+                                <div id="ready-count">已就绪: 0/0</div>
+                            </div>
+                        </div>
+
+                        <div class="panel-section">
+                            <h3>事件日志</h3>
+                            <div id="event-log" class="event-log"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="result-screen" class="screen">
+            <div class="result-container">
+                <h1 id="result-title">游戏结束</h1>
+                <div id="result-ranking" class="result-ranking"></div>
+                <button id="btn-back-lobby" class="btn btn-primary btn-large">返回大厅</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="game/main.js"></script>
+</body>
+</html>
