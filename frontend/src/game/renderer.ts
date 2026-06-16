@@ -6,7 +6,7 @@ import {
   Player,
   AntibioticType,
   ActionType,
-} from './types';
+} from './types.js';
 
 export interface RenderAnimation {
   type: 'attack' | 'spread' | 'mutation';
@@ -46,6 +46,14 @@ export class DishRenderer {
   private animationFrame: number = 0;
   private onClickCallback: ((pos: Position) => void) | null = null;
   private onHoverCallback: ((pos: Position | null) => void) | null = null;
+
+  private isGridInsideDish(gx: number, gy: number, gridSize: number): boolean {
+    const center = (gridSize - 1) / 2;
+    const radius = gridSize / 2 - 0.5;
+    const dx = gx - center;
+    const dy = gy - center;
+    return Math.sqrt(dx * dx + dy * dy) <= radius;
+  }
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -235,6 +243,7 @@ export class DishRenderer {
 
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
+        if (!this.isGridInsideDish(x, y, size)) continue;
         const cell = this.state.gameState.grid[y][x];
         const nutrientLevel = cell.environment.nutrient / cell.environment.maxNutrient;
         if (nutrientLevel < 0.05) continue;
@@ -255,6 +264,7 @@ export class DishRenderer {
 
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
+        if (!this.isGridInsideDish(x, y, size)) continue;
         const cell = this.state.gameState.grid[y][x];
         const abx = cell.environment.antibiotics;
         let total = 0;
@@ -279,6 +289,7 @@ export class DishRenderer {
 
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
+        if (!this.isGridInsideDish(x, y, size)) continue;
         const cell = this.state.gameState.grid[y][x];
         const temp = cell.environment.temperature;
         if (temp >= 30 && temp <= 40) continue;
@@ -301,23 +312,17 @@ export class DishRenderer {
 
   private drawColonies() {
     if (!this.state.gameState) return;
-    const ctx = this.ctx;
-
-    const byPlayer = new Map<string, Colony[]>();
-    for (const colony of this.state.gameState.colonies) {
-      if (!byPlayer.has(colony.playerId)) {
-        byPlayer.set(colony.playerId, []);
-      }
-      byPlayer.get(colony.playerId)!.push(colony);
-    }
+    const size = this.state.gameState.gridSize;
 
     for (const colony of this.state.gameState.colonies) {
+      if (!this.isGridInsideDish(colony.position.x, colony.position.y, size)) continue;
       this.drawSingleColony(colony);
     }
   }
 
   private drawSingleColony(colony: Colony) {
     if (!this.state.gameState) return;
+    if (!this.isGridInsideDish(colony.position.x, colony.position.y, this.state.gameState.gridSize)) return;
     const ctx = this.ctx;
     const player = this.state.gameState.players.find((p) => p.id === colony.playerId);
     if (!player) return;
@@ -374,6 +379,7 @@ export class DishRenderer {
     if (!this.state.gameState || !this.state.selectedColonyId) return;
     const colony = this.state.gameState.colonies.find((c) => c.id === this.state.selectedColonyId);
     if (!colony) return;
+    if (!this.isGridInsideDish(colony.position.x, colony.position.y, this.state.gameState.gridSize)) return;
 
     const ctx = this.ctx;
     const screen = this.gridToScreen(colony.position);
@@ -390,10 +396,12 @@ export class DishRenderer {
 
   private drawHoverHighlight() {
     if (!this.state.gameState || !this.state.hoveredCell) return;
-    const ctx = this.ctx;
     const { x, y } = this.state.hoveredCell;
-    if (x < 0 || x >= this.state.gameState.gridSize || y < 0 || y >= this.state.gameState.gridSize) return;
+    const size = this.state.gameState.gridSize;
+    if (x < 0 || x >= size || y < 0 || y >= size) return;
+    if (!this.isGridInsideDish(x, y, size)) return;
 
+    const ctx = this.ctx;
     const sx = this.gridOffset.x + x * this.cellSize;
     const sy = this.gridOffset.y + y * this.cellSize;
 
@@ -404,9 +412,14 @@ export class DishRenderer {
 
   private drawActionPreview() {
     if (!this.state.gameState || !this.state.selectedColonyId || !this.state.hoveredCell) return;
+    const size = this.state.gameState.gridSize;
+    const { x, y } = this.state.hoveredCell;
+    if (!this.isGridInsideDish(x, y, size)) return;
+
     const ctx = this.ctx;
     const colony = this.state.gameState.colonies.find((c) => c.id === this.state.selectedColonyId);
     if (!colony) return;
+    if (!this.isGridInsideDish(colony.position.x, colony.position.y, size)) return;
 
     const dist = Math.sqrt(
       Math.pow(this.state.hoveredCell.x - colony.position.x, 2) +
@@ -432,13 +445,19 @@ export class DishRenderer {
   }
 
   private drawAnimations() {
-    if (this.state.animations.length === 0) return;
+    if (this.state.animations.length === 0 || !this.state.gameState) return;
     const ctx = this.ctx;
     const now = Date.now();
     const toRemove: number[] = [];
+    const size = this.state.gameState.gridSize;
 
     for (let i = 0; i < this.state.animations.length; i++) {
       const anim = this.state.animations[i];
+      if (!this.isGridInsideDish(anim.position.x, anim.position.y, size)) {
+        toRemove.push(i);
+        continue;
+      }
+
       const elapsed = now - anim.startTime;
       const progress = Math.min(1, elapsed / anim.duration);
       if (progress >= 1) {

@@ -2,7 +2,7 @@ import {
   ClientMessage,
   ServerMessage,
   ServerMessageType,
-} from './types';
+} from './types.js';
 
 export type MessageHandler = (payload: any) => void;
 

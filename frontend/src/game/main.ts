@@ -8,9 +8,9 @@ import {
   EventLogEntry,
   Colony,
   PlayerAction,
-} from './types';
-import { GameWebSocket } from './network';
-import { DishRenderer, RenderAnimation } from './renderer';
+} from './types.js';
+import { GameWebSocket } from './network.js';
+import { DishRenderer, RenderAnimation } from './renderer.js';
 
 const MICROBE_NAMES: Record<MicrobeType, string> = {
   bacteria: '🦠 细菌',
