@@ -16,6 +16,8 @@ import {
   regenerateNutrients,
   perturbEnvironment,
   triggerGlobalEvent,
+  isInsideDish,
+  getDishCellCount,
 } from './environment';
 import {
   MICROBE_TEMPLATES,
@@ -85,13 +87,22 @@ export function createGameState(players: Player[]): GameState {
 
 function getStartPositions(count: number, gridSize: number): Position[] {
   const positions: Position[] = [];
-  const center = gridSize / 2;
+  const center = (gridSize - 1) / 2;
   const radius = gridSize * 0.35;
 
   for (let i = 0; i < count; i++) {
     const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
-    const x = Math.floor(center + Math.cos(angle) * radius);
-    const y = Math.floor(center + Math.sin(angle) * radius);
+    let x = Math.floor(center + Math.cos(angle) * radius);
+    let y = Math.floor(center + Math.sin(angle) * radius);
+
+    if (!isInsideDish(x, y, gridSize)) {
+      for (let shrink = 0.9; shrink > 0.3; shrink -= 0.05) {
+        x = Math.floor(center + Math.cos(angle) * radius * shrink);
+        y = Math.floor(center + Math.sin(angle) * radius * shrink);
+        if (isInsideDish(x, y, gridSize)) break;
+      }
+    }
+
     positions.push({ x, y });
   }
 
@@ -274,6 +285,7 @@ function getChemotaxisTargets(
       const nx = colony.position.x + dx;
       const ny = colony.position.y + dy;
       if (nx < 0 || nx >= gameState.gridSize || ny < 0 || ny >= gameState.gridSize) continue;
+      if (!isInsideDish(nx, ny, gameState.gridSize)) continue;
 
       const cell = gameState.grid[ny][nx];
       let score = cell.environment.nutrient * 10;
@@ -367,6 +379,10 @@ function createOffspringColony(
   targetCell: Cell,
   events: EventLogEntry[]
 ) {
+  if (!isInsideDish(targetCell.position.x, targetCell.position.y, gameState.gridSize)) {
+    return;
+  }
+
   const offspringBiomass = parent.biomass * 0.4;
   if (offspringBiomass < 10) return;
 
@@ -1061,16 +1077,16 @@ function checkVictoryCondition(
   events: EventLogEntry[]
 ): boolean {
   const alivePlayers = gameState.players.filter((p) => p.isAlive && !p.isSpectator);
-  let totalArea = 0;
-  for (const p of alivePlayers) totalArea += p.totalArea;
+  const totalDishCells = getDishCellCount(gameState.gridSize);
 
   for (const player of alivePlayers) {
-    if (totalArea > 0 && player.totalArea / totalArea >= VICTORY_AREA_PERCENTAGE) {
+    if (player.totalArea / totalDishCells >= VICTORY_AREA_PERCENTAGE) {
       gameState.winnerId = player.id;
+      const percent = Math.round((player.totalArea / totalDishCells) * 100);
       events.push({
         turn: gameState.turn,
         type: 'victory',
-        message: `🏆 ${player.name} 提前胜利！控制了全场 ${Math.round(player.totalArea / totalArea * 100)}% 的领地！`,
+        message: `🏆 ${player.name} 提前胜利！控制了全场 ${percent}% 的领地！`,
         playerId: player.id,
       });
       return true;

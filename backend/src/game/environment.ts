@@ -16,11 +16,33 @@ export const GRID_SIZE = 30;
 export const NUTRIENT_REGEN_RATE = 0.02;
 export const MAX_NUTRIENT_CENTER = 1.0;
 export const MAX_NUTRIENT_EDGE = 0.3;
+export const DISH_RADIUS_RATIO = 0.48;
+
+export function getDishRadius(gridSize: number): number {
+  return gridSize * DISH_RADIUS_RATIO;
+}
+
+export function isInsideDish(x: number, y: number, gridSize: number): boolean {
+  const center = (gridSize - 1) / 2;
+  const radius = getDishRadius(gridSize);
+  const dist = Math.sqrt(Math.pow(x - center, 2) + Math.pow(y - center, 2));
+  return dist <= radius;
+}
+
+export function getDishCellCount(gridSize: number): number {
+  let count = 0;
+  for (let y = 0; y < gridSize; y++) {
+    for (let x = 0; x < gridSize; x++) {
+      if (isInsideDish(x, y, gridSize)) count++;
+    }
+  }
+  return count;
+}
 
 export function createInitialGrid(size: number): Cell[][] {
   const grid: Cell[][] = [];
-  const center = size / 2;
-  const maxDist = Math.sqrt(2) * center;
+  const center = (size - 1) / 2;
+  const radius = getDishRadius(size);
 
   for (let y = 0; y < size; y++) {
     const row: Cell[] = [];
@@ -28,16 +50,26 @@ export function createInitialGrid(size: number): Cell[][] {
       const distFromCenter = Math.sqrt(
         Math.pow(x - center, 2) + Math.pow(y - center, 2)
       );
-      const distFactor = 1 - distFromCenter / maxDist;
-      const maxNutrient =
-        MAX_NUTRIENT_EDGE +
-        (MAX_NUTRIENT_CENTER - MAX_NUTRIENT_EDGE) * distFactor;
+      const inside = distFromCenter <= radius;
+
+      let maxNutrient = 0;
+      let temperature = 25;
+      let pH = 7.0;
+
+      if (inside) {
+        const distFactor = 1 - distFromCenter / radius;
+        maxNutrient =
+          MAX_NUTRIENT_EDGE +
+          (MAX_NUTRIENT_CENTER - MAX_NUTRIENT_EDGE) * distFactor;
+        temperature = 35 + Math.random() * 5 - 2.5;
+        pH = 6.8 + Math.random() * 0.8 - 0.4;
+      }
 
       const environment: CellEnvironment = {
         nutrient: maxNutrient,
         maxNutrient: maxNutrient,
-        temperature: 35 + Math.random() * 5 - 2.5,
-        pH: 6.8 + Math.random() * 0.8 - 0.4,
+        temperature,
+        pH,
         antibiotics: {},
       };
 
@@ -59,12 +91,17 @@ export function createInitialGrid(size: number): Cell[][] {
 
 function addRandomHotSpots(grid: Cell[][], size: number) {
   const hotSpots = 2 + Math.floor(Math.random() * 3);
+  const dishRadius = getDishRadius(size);
+  const center = (size - 1) / 2;
   for (let i = 0; i < hotSpots; i++) {
-    const cx = Math.floor(Math.random() * size);
-    const cy = Math.floor(Math.random() * size);
+    const angle = Math.random() * Math.PI * 2;
+    const r = Math.random() * dishRadius * 0.7;
+    const cx = Math.floor(center + Math.cos(angle) * r);
+    const cy = Math.floor(center + Math.sin(angle) * r);
     const radius = 3 + Math.floor(Math.random() * 3);
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
+        if (!isInsideDish(x, y, size)) continue;
         const dist = Math.sqrt(
           Math.pow(x - cx, 2) + Math.pow(y - cy, 2)
         );
@@ -79,13 +116,18 @@ function addRandomHotSpots(grid: Cell[][], size: number) {
 
 function addRandomPhZones(grid: Cell[][], size: number) {
   const zones = 2 + Math.floor(Math.random() * 2);
+  const dishRadius = getDishRadius(size);
+  const center = (size - 1) / 2;
   for (let i = 0; i < zones; i++) {
-    const cx = Math.floor(Math.random() * size);
-    const cy = Math.floor(Math.random() * size);
+    const angle = Math.random() * Math.PI * 2;
+    const r = Math.random() * dishRadius * 0.7;
+    const cx = Math.floor(center + Math.cos(angle) * r);
+    const cy = Math.floor(center + Math.sin(angle) * r);
     const radius = 3 + Math.floor(Math.random() * 4);
     const isAcidic = Math.random() > 0.5;
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
+        if (!isInsideDish(x, y, size)) continue;
         const dist = Math.sqrt(
           Math.pow(x - cx, 2) + Math.pow(y - cy, 2)
         );
@@ -96,12 +138,9 @@ function addRandomPhZones(grid: Cell[][], size: number) {
           } else {
             grid[y][x].environment.pH += 0.8 * factor;
           }
+          grid[y][x].environment.pH = Math.max(4.5, Math.min(9.0, grid[y][x].environment.pH));
         }
       }
-      grid[y].forEach(cell => {
-        cell.environment.pH = Math.max(4.5, Math.min(9.0, cell.environment.pH));
-      }
-      );
     }
   }
 }
@@ -109,13 +148,18 @@ function addRandomPhZones(grid: Cell[][], size: number) {
 function addRandomAntibioticPatches(grid: Cell[][], size: number) {
   const types: AntibioticType[] = ['penicillin', 'streptomycin', 'tetracycline'];
   const patches = 1 + Math.floor(Math.random() * 2);
+  const dishRadius = getDishRadius(size);
+  const center = (size - 1) / 2;
   for (let i = 0; i < patches; i++) {
-    const cx = Math.floor(Math.random() * size);
-    const cy = Math.floor(Math.random() * size);
+    const angle = Math.random() * Math.PI * 2;
+    const r = Math.random() * dishRadius * 0.7;
+    const cx = Math.floor(center + Math.cos(angle) * r);
+    const cy = Math.floor(center + Math.sin(angle) * r);
     const radius = 2 + Math.floor(Math.random() * 2);
     const type = types[Math.floor(Math.random() * types.length)];
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
+        if (!isInsideDish(x, y, size)) continue;
         const dist = Math.sqrt(
           Math.pow(x - cx, 2) + Math.pow(y - cy, 2)
         );
@@ -131,6 +175,7 @@ function addRandomAntibioticPatches(grid: Cell[][], size: number) {
 export function regenerateNutrients(grid: Cell[][], size: number) {
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
+      if (!isInsideDish(x, y, size)) continue;
       const cell = grid[y][x];
       if (cell.environment.nutrient < cell.environment.maxNutrient) {
         cell.environment.nutrient = Math.min(
@@ -146,6 +191,7 @@ export function regenerateNutrients(grid: Cell[][], size: number) {
 export function perturbEnvironment(grid: Cell[][], size: number) {
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
+      if (!isInsideDish(x, y, size)) continue;
       const env = grid[y][x].environment;
       env.temperature += (Math.random() - 0.5) * 0.4;
       env.temperature = Math.max(20, Math.min(50, env.temperature));
@@ -187,14 +233,17 @@ export function triggerGlobalEvent(
       const types: AntibioticType[] = ['penicillin', 'streptomycin', 'tetracycline'];
       const antibioticType = types[Math.floor(Math.random() * types.length)];
       const affectedArea: Position[] = [];
-      const cx = Math.floor(Math.random() * gameState.gridSize * 0.6) +
-        gameState.gridSize * 0.2;
-      const cy = Math.floor(Math.random() * gameState.gridSize * 0.6) +
-        gameState.gridSize * 0.2;
+      const center = (gameState.gridSize - 1) / 2;
+      const dishRadius = getDishRadius(gameState.gridSize);
+      const angle = Math.random() * Math.PI * 2;
+      const r = Math.random() * dishRadius * 0.6;
+      const cx = Math.floor(center + Math.cos(angle) * r);
+      const cy = Math.floor(center + Math.sin(angle) * r);
       const radius = 4 + Math.floor(Math.random() * 4);
 
       for (let y = 0; y < gameState.gridSize; y++) {
         for (let x = 0; x < gameState.gridSize; x++) {
+          if (!isInsideDish(x, y, gameState.gridSize)) continue;
           const dist = Math.sqrt(
             Math.pow(x - cx, 2) + Math.pow(y - cy, 2)
           );
@@ -225,6 +274,7 @@ export function triggerGlobalEvent(
       const delta = Math.random() > 0.5 ? 5 : -5;
       for (let y = 0; y < gameState.gridSize; y++) {
         for (let x = 0; x < gameState.gridSize; x++) {
+          if (!isInsideDish(x, y, gameState.gridSize)) continue;
           gameState.grid[y][x].environment.temperature += delta;
           gameState.grid[y][x].environment.temperature = Math.max(
             20,
@@ -246,14 +296,17 @@ export function triggerGlobalEvent(
 
     case 'nutrient_depletion': {
       const affectedArea: Position[] = [];
-      const cx = Math.floor(Math.random() * gameState.gridSize * 0.6) +
-        gameState.gridSize * 0.2;
-      const cy = Math.floor(Math.random() * gameState.gridSize * 0.6) +
-        gameState.gridSize * 0.2;
+      const center = (gameState.gridSize - 1) / 2;
+      const dishRadius = getDishRadius(gameState.gridSize);
+      const angle = Math.random() * Math.PI * 2;
+      const r = Math.random() * dishRadius * 0.6;
+      const cx = Math.floor(center + Math.cos(angle) * r);
+      const cy = Math.floor(center + Math.sin(angle) * r);
       const radius = 5 + Math.floor(Math.random() * 4);
 
       for (let y = 0; y < gameState.gridSize; y++) {
         for (let x = 0; x < gameState.gridSize; x++) {
+          if (!isInsideDish(x, y, gameState.gridSize)) continue;
           const dist = Math.sqrt(
             Math.pow(x - cx, 2) + Math.pow(y - cy, 2)
           );

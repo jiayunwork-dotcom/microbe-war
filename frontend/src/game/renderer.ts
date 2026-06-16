@@ -176,6 +176,11 @@ export class DishRenderer {
 
     if (!this.state.gameState) return;
 
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(this.centerX, this.centerY, this.dishRadius - 2, 0, Math.PI * 2);
+    ctx.clip();
+
     this.drawNutrientLayer();
     this.drawAntibioticLayer();
     this.drawTemperatureLayer();
@@ -184,6 +189,9 @@ export class DishRenderer {
     this.drawHoverHighlight();
     this.drawActionPreview();
     this.drawAnimations();
+
+    ctx.restore();
+
     this.drawDishBorder();
   }
 
