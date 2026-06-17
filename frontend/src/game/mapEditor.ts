@@ -533,7 +533,7 @@ export class MapEditor {
   }
 
   private generateArena() {
-    const center = (GRID_SIZE - 1) / 2;
+    const center = Math.floor(GRID_SIZE / 2);
     const diamondRadius = 12;
 
     for (let y = 0; y < GRID_SIZE; y++) {
@@ -591,7 +591,9 @@ export class MapEditor {
         const nx = x + dx;
         const ny = y + dy;
         if (nx > 0 && nx < GRID_SIZE - 1 && ny > 0 && ny < GRID_SIZE - 1 && maze[ny][nx]) {
-          maze[y + dy / 2][x + dx / 2] = false;
+          const midX = x + Math.floor(dx / 2);
+          const midY = y + Math.floor(dy / 2);
+          maze[midY][midX] = false;
           carve(nx, ny);
         }
       }
@@ -658,13 +660,14 @@ export class MapEditor {
       }
     }
 
+    const halfGrid = Math.floor(GRID_SIZE / 2);
     const islandCenters: Position[] = [
       { x: 5, y: 5 },
       { x: GRID_SIZE - 6, y: 5 },
       { x: 5, y: GRID_SIZE - 6 },
       { x: GRID_SIZE - 6, y: GRID_SIZE - 6 },
-      { x: Math.floor(GRID_SIZE / 2), y: 5 },
-      { x: Math.floor(GRID_SIZE / 2), y: GRID_SIZE - 6 },
+      { x: halfGrid, y: 5 },
+      { x: halfGrid, y: GRID_SIZE - 6 },
     ];
 
     for (let i = 0; i < islandCenters.length; i++) {

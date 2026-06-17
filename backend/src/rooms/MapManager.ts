@@ -3,8 +3,8 @@ import {
   TerrainType,
   Position,
   MapValidationResult,
-} from '../game/types.js';
-import { GRID_SIZE, isInsideDish } from '../game/environment.js';
+} from '../game/types';
+import { GRID_SIZE, isInsideDish } from '../game/environment';
 import { v4 as uuidv4 } from 'uuid';
 
 const MAX_MAPS = 50;
