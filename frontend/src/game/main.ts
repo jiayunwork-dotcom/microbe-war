@@ -58,7 +58,7 @@ class GameController {
   private compareMode: boolean = false;
   private compareReplayLeft: ReplayData | null = null;
   private compareReplayRight: ReplayData | null = null;
-  private compareTurn: number = 0;
+  private compareProgressRatio: number = 0;
   private compareIsPlaying: boolean = false;
   private comparePlaybackSpeed: number = 1;
   private comparePlaybackTimer: number | null = null;
@@ -1639,31 +1639,29 @@ class GameController {
 
   private renderHighlightsOnProgress() {
     if (!this.currentReplay) return;
-    const container = document.querySelector(
-      '.replay-controls .replay-progress-container'
+    const trackWrap = document.querySelector(
+      '.replay-controls:not(#replay-controls-compare) .replay-progress-track-wrap'
     ) as HTMLElement;
-    if (!container) return;
+    if (!trackWrap) return;
 
-    const existing = container.querySelectorAll('.highlight-marker-dot');
+    const existing = trackWrap.querySelectorAll('.highlight-marker-dot');
     existing.forEach((el) => el.remove());
 
     const highlights = this.currentReplay.highlights || [];
     const totalTurns = this.currentReplay.stats.totalTurns;
-
-    const progressEl = document.getElementById('replay-progress') as HTMLInputElement;
-    if (!progressEl) return;
+    if (totalTurns <= 0) return;
 
     for (const h of highlights) {
       const dot = document.createElement('div');
       dot.className = 'highlight-marker-dot';
-      const pct = totalTurns > 0 ? (h.turn / totalTurns) * 100 : 0;
+      const pct = (h.turn / totalTurns) * 100;
       dot.style.left = `calc(${pct}% - 5px)`;
       dot.title = `第${h.turn}回合: ${h.description}`;
       dot.addEventListener('click', (e) => {
         e.stopPropagation();
         this.jumpToHighlight(h.turn);
       });
-      container.appendChild(dot);
+      trackWrap.appendChild(dot);
     }
   }
 
@@ -1987,8 +1985,8 @@ class GameController {
       progressLeft.value = '0';
     }
 
-    this.compareTurn = 0;
-    this.renderCompareTurn(this.compareTurn);
+    this.compareProgressRatio = 0;
+    this.renderCompareProgress(this.compareProgressRatio);
     this.updateComparePlayButton();
 
     if (!this.compareReplayRight) {
@@ -2045,7 +2043,7 @@ class GameController {
           progressRight.value = '0';
         }
 
-        this.renderCompareTurn(this.compareTurn);
+        this.renderCompareProgress(this.compareProgressRatio);
         this.showToast('对比回放加载成功');
         this.network.off('replay_data', originalHandler);
       }
@@ -2057,11 +2055,21 @@ class GameController {
     }, 5000);
   }
 
-  private renderCompareTurn(turn: number) {
-    this.compareTurn = turn;
+  private getCompareReferenceTurns(): number {
+    const maxL = this.compareReplayLeft?.stats.totalTurns || 0;
+    const maxR = this.compareReplayRight?.stats.totalTurns || 0;
+    return Math.max(maxL, maxR);
+  }
+
+  private ratioToTurn(ratio: number, totalTurns: number): number {
+    return Math.max(0, Math.min(Math.round(ratio * totalTurns), totalTurns));
+  }
+
+  private renderCompareProgress(ratio: number) {
+    this.compareProgressRatio = Math.max(0, Math.min(ratio, 1));
 
     const maxLeft = this.compareReplayLeft?.stats.totalTurns || 0;
-    const turnLeft = Math.min(turn, maxLeft);
+    const turnLeft = this.ratioToTurn(this.compareProgressRatio, maxLeft);
     if (this.compareReplayLeft && this.replayRendererLeft) {
       const snapshot = this.compareReplayLeft.turnSnapshots[turnLeft];
       if (snapshot) {
@@ -2090,7 +2098,7 @@ class GameController {
     }
 
     const maxRight = this.compareReplayRight?.stats.totalTurns || 0;
-    const turnRight = Math.min(turn, maxRight);
+    const turnRight = this.ratioToTurn(this.compareProgressRatio, maxRight);
     if (this.compareReplayRight && this.replayRendererRight) {
       const snapshot = this.compareReplayRight.turnSnapshots[turnRight];
       if (snapshot) {
@@ -2118,21 +2126,16 @@ class GameController {
       if (progressRight) progressRight.value = String(turnRight);
     }
 
-    this.renderDiffSummary(turn);
+    this.renderDiffSummary(turnLeft, turnRight);
   }
 
-  private renderDiffSummary(turn: number) {
+  private renderDiffSummary(turnL: number, turnR: number) {
     const panel = document.getElementById('replay-diff-summary') as HTMLElement;
     if (!panel) return;
     if (!this.compareReplayLeft || !this.compareReplayRight) {
       panel.innerHTML = '<div class="replay-event-empty">请先加载两场回放</div>';
       return;
     }
-
-    const maxLeft = this.compareReplayLeft.stats.totalTurns;
-    const maxRight = this.compareReplayRight.stats.totalTurns;
-    const turnL = Math.min(turn, maxLeft);
-    const turnR = Math.min(turn, maxRight);
 
     const snapL = this.compareReplayLeft.turnSnapshots[turnL];
     const snapR = this.compareReplayRight.turnSnapshots[turnR];
@@ -2226,20 +2229,12 @@ class GameController {
   }
 
   private seekCompareTurn(turn: number, source: 'left' | 'right') {
-    const ratio =
+    const totalTurns =
       source === 'left'
-        ? turn / (this.compareReplayLeft?.stats.totalTurns || 1)
-        : turn / (this.compareReplayRight?.stats.totalTurns || 1);
-
-    const targetLeft = Math.round(
-      ratio * (this.compareReplayLeft?.stats.totalTurns || 0)
-    );
-    const targetRight = Math.round(
-      ratio * (this.compareReplayRight?.stats.totalTurns || 0)
-    );
-
-    const commonTurn = source === 'left' ? targetLeft : targetRight;
-    this.renderCompareTurn(commonTurn);
+        ? this.compareReplayLeft?.stats.totalTurns || 1
+        : this.compareReplayRight?.stats.totalTurns || 1;
+    const ratio = turn / totalTurns;
+    this.renderCompareProgress(ratio);
   }
 
   private toggleComparePlay() {
@@ -2266,17 +2261,22 @@ class GameController {
     const baseInterval = 1000;
     const interval = baseInterval / this.comparePlaybackSpeed;
     this.comparePlaybackTimer = window.setInterval(() => {
-      const maxL = this.compareReplayLeft?.stats.totalTurns || 0;
-      const maxR = this.compareReplayRight?.stats.totalTurns || 0;
-      const maxTurn = Math.max(maxL, maxR);
-      if (this.compareTurn >= maxTurn) {
+      const referenceTurns = this.getCompareReferenceTurns();
+      if (referenceTurns <= 0) {
         this.stopComparePlayback();
         this.compareIsPlaying = false;
         this.updateComparePlayButton();
         return;
       }
-      this.compareTurn++;
-      this.renderCompareTurn(this.compareTurn);
+      if (this.compareProgressRatio >= 1) {
+        this.stopComparePlayback();
+        this.compareIsPlaying = false;
+        this.updateComparePlayButton();
+        return;
+      }
+      const stepRatio = 1 / referenceTurns;
+      const nextRatio = Math.min(this.compareProgressRatio + stepRatio, 1);
+      this.renderCompareProgress(nextRatio);
     }, interval);
   }
 

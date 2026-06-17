@@ -328,7 +328,9 @@
                         <button class="btn btn-small btn-speed" data-speed="4">4x</button>
                     </div>
                     <div class="replay-progress-container">
-                        <input type="range" id="replay-progress" min="0" max="0" value="0" class="replay-progress">
+                        <div class="replay-progress-track-wrap">
+                            <input type="range" id="replay-progress" min="0" max="0" value="0" class="replay-progress">
+                        </div>
                         <span id="replay-progress-label">0</span>
                     </div>
                 </div>
@@ -345,12 +347,16 @@
                     </div>
                     <div class="replay-progress-container">
                         <span class="compare-progress-label">A:</span>
-                        <input type="range" id="replay-progress-left" min="0" max="0" value="0" class="replay-progress">
+                        <div class="replay-progress-track-wrap">
+                            <input type="range" id="replay-progress-left" min="0" max="0" value="0" class="replay-progress">
+                        </div>
                         <span id="replay-progress-label-left">0</span>
                     </div>
                     <div class="replay-progress-container">
                         <span class="compare-progress-label">B:</span>
-                        <input type="range" id="replay-progress-right" min="0" max="0" value="0" class="replay-progress">
+                        <div class="replay-progress-track-wrap">
+                            <input type="range" id="replay-progress-right" min="0" max="0" value="0" class="replay-progress">
+                        </div>
                         <span id="replay-progress-label-right">0</span>
                     </div>
                 </div>
