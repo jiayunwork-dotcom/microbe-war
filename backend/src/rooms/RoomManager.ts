@@ -11,6 +11,8 @@ import {
   TacticalMarker,
   Alliance,
   MarkerType,
+  ReplayData,
+  KillEvent,
 } from '../game/types';
 import {
   createGameState,
@@ -18,6 +20,7 @@ import {
   processTurn,
 } from '../game/engine';
 import { v4 as uuidv4 } from 'uuid';
+import { ReplayManager } from './ReplayManager';
 
 export interface ConnectedClient {
   ws: WebSocket;
@@ -44,6 +47,7 @@ interface Room {
 export class RoomManager {
   private rooms: Map<string, Room> = new Map();
   private clients: Map<string, ConnectedClient> = new Map();
+  private replayManager: ReplayManager = new ReplayManager();
 
   addClient(clientId: string, client: ConnectedClient) {
     this.clients.set(clientId, client);
@@ -247,6 +251,8 @@ export class RoomManager {
       payload: this.serializeGameState(room.gameState),
     });
 
+    this.replayManager.startRecording(roomId, room.name, room.gameState);
+
     return room.gameState;
   }
 
@@ -341,8 +347,18 @@ export class RoomManager {
 
     this.checkAllianceBetrayals(roomId, allActions);
 
-    const { events } = processTurn(room.gameState, allActions);
+    const { events, kills } = processTurn(room.gameState, allActions);
     room.gameState.eventLog.push(...events);
+
+    for (const kill of kills) {
+      if (kill.attackerPlayerId !== 'phage') {
+        this.replayManager.recordKill(roomId, kill.attackerPlayerId, kill.victimPlayerId);
+      }
+    }
+
+    this.replayManager.recordTurnSnapshot(roomId, room.gameState, allActions);
+    this.replayManager.recordTurnEvents(roomId, events);
+    this.replayManager.recordMarkers(roomId, room.markers);
 
     room.pendingActions.clear();
     for (const p of room.gameState.players) {
@@ -360,10 +376,19 @@ export class RoomManager {
         gameState: this.serializeGameState(room.gameState),
         events,
         markers: room.markers,
+        kills,
       },
     });
 
     if (isFinished) {
+      const replayData = this.replayManager.finishRecording(roomId, room.gameState);
+      this.broadcastToRoom(roomId, {
+        type: 'game_ended_with_stats',
+        payload: {
+          gameState: this.serializeGameState(room.gameState),
+          replayData,
+        },
+      });
       this.broadcastToRoom(roomId, {
         type: 'game_ended',
         payload: {
@@ -548,6 +573,8 @@ export class RoomManager {
       room.chatMessages = room.chatMessages.slice(-50);
     }
 
+    this.replayManager.recordChatMessage(roomId, msg);
+
     this.broadcastToRoom(roomId, {
       type: 'chat_message',
       payload: msg,
@@ -574,6 +601,8 @@ export class RoomManager {
     if (room.chatMessages.length > 50) {
       room.chatMessages = room.chatMessages.slice(-50);
     }
+
+    this.replayManager.recordChatMessage(roomId, msg);
 
     this.broadcastToRoom(roomId, {
       type: 'chat_message',
@@ -737,6 +766,15 @@ export class RoomManager {
       },
     });
 
+    if (room.gameState) {
+      this.replayManager.recordAllianceFormed(
+        roomId,
+        room.gameState.turn,
+        fromPlayerId,
+        client.playerId
+      );
+    }
+
     this.sendSystemChat(roomId, `${fromPlayer?.name} 与 ${responder.name} 结成了联盟！`);
 
     this.broadcastAlliances(roomId);
@@ -755,6 +793,16 @@ export class RoomManager {
           (a.playerId1 === playerId2 && a.playerId2 === playerId1)
         )
     );
+
+    if (room.gameState) {
+      this.replayManager.recordAllianceBroken(
+        roomId,
+        room.gameState.turn,
+        playerId1,
+        playerId2,
+        betrayerId
+      );
+    }
 
     const betrayer = room.gameState?.players.find((p) => p.id === betrayerId);
     const victim = room.gameState?.players.find(
@@ -817,5 +865,17 @@ export class RoomManager {
 
   getRoomHost(roomId: string): string | null {
     return this.rooms.get(roomId)?.hostId || null;
+  }
+
+  getReplay(replayId: string): ReplayData | null {
+    return this.replayManager.getReplay(replayId);
+  }
+
+  getReplayByRoomId(roomId: string): ReplayData | null {
+    return this.replayManager.getReplayByRoomId(roomId);
+  }
+
+  getReplayList() {
+    return this.replayManager.getReplayList();
   }
 }

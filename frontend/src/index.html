@@ -203,7 +203,75 @@
             <div class="result-container">
                 <h1 id="result-title">游戏结束</h1>
                 <div id="result-ranking" class="result-ranking"></div>
-                <button id="btn-back-lobby" class="btn btn-primary btn-large">返回大厅</button>
+
+                <div id="result-stats" class="result-stats">
+                    <h2>📊 对局统计</h2>
+                    <div id="global-stats" class="global-stats"></div>
+                    <div id="player-stats-detail" class="player-stats-detail"></div>
+                    <div class="chart-container">
+                        <h3>📈 领地变化趋势</h3>
+                        <canvas id="area-chart-canvas" width="800" height="300"></canvas>
+                    </div>
+                </div>
+
+                <div class="result-actions">
+                    <button id="btn-watch-replay" class="btn btn-secondary btn-large">观看回放</button>
+                    <button id="btn-back-lobby" class="btn btn-primary btn-large">返回大厅</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="replay-screen" class="screen">
+            <div class="replay-container">
+                <div class="replay-header">
+                    <h1 id="replay-title">对战回放</h1>
+                    <div class="replay-info">
+                        <span id="replay-room-name"></span>
+                        <span id="replay-turn-info">回合: 0 / 0</span>
+                    </div>
+                    <button id="btn-exit-replay" class="btn btn-danger btn-small">退出回放</button>
+                </div>
+
+                <div class="replay-main">
+                    <div class="dish-container">
+                        <canvas id="replay-canvas" width="600" height="600"></canvas>
+                    </div>
+
+                    <div class="side-panel">
+                        <div class="panel-section">
+                            <h3>当前回合事件</h3>
+                            <div id="replay-event-panel" class="replay-event-panel">
+                                <div class="replay-event-empty">拖动进度条或点击播放开始回放</div>
+                            </div>
+                        </div>
+
+                        <div class="panel-section">
+                            <h3>玩家状态</h3>
+                            <div id="replay-player-stats" class="replay-player-stats"></div>
+                        </div>
+
+                        <div class="panel-section">
+                            <h3>聊天记录</h3>
+                            <div id="replay-chat" class="replay-chat"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="replay-controls">
+                    <button id="btn-replay-play" class="btn btn-primary">
+                        <span id="replay-play-icon">▶</span>
+                        <span id="replay-play-text">播放</span>
+                    </button>
+                    <div class="replay-speed-controls">
+                        <button class="btn btn-small btn-speed active" data-speed="1">1x</button>
+                        <button class="btn btn-small btn-speed" data-speed="2">2x</button>
+                        <button class="btn btn-small btn-speed" data-speed="4">4x</button>
+                    </div>
+                    <div class="replay-progress-container">
+                        <input type="range" id="replay-progress" min="0" max="0" value="0" class="replay-progress">
+                        <span id="replay-progress-label">0</span>
+                    </div>
+                </div>
             </div>
         </div>
 

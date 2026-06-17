@@ -9,6 +9,8 @@ import {
   EventLogEntry,
   MicrobeType,
   GlobalEvent,
+  KillEvent,
+  TurnResult,
 } from './types';
 import {
   GRID_SIZE,
@@ -152,14 +154,15 @@ export function createPlayer(
 export function processTurn(
   gameState: GameState,
   actions: PlayerAction[]
-): { events: EventLogEntry[] } {
+): TurnResult {
   const turnEvents: EventLogEntry[] = [];
+  const turnKills: KillEvent[] = [];
   gameState.turn++;
 
   phaseNutrientUptake(gameState, turnEvents);
-  phasePhageInjectionResolution(gameState, turnEvents);
-  phaseReproductionAndSpread(gameState, actions, turnEvents);
-  phaseAttackResolution(gameState, actions, turnEvents);
+  phasePhageInjectionResolution(gameState, turnEvents, turnKills);
+  phaseReproductionAndSpread(gameState, actions, turnEvents, turnKills);
+  phaseAttackResolution(gameState, actions, turnEvents, turnKills);
   phaseAntibioticDamage(gameState, turnEvents);
   phaseTemperatureDamage(gameState, turnEvents);
   phaseBiofilmRegeneration(gameState);
@@ -175,7 +178,7 @@ export function processTurn(
     gameState.status = 'finished';
   }
 
-  return { events: turnEvents };
+  return { events: turnEvents, kills: turnKills };
 }
 
 function phaseNutrientUptake(
@@ -207,18 +210,28 @@ function phaseNutrientUptake(
 
 function phasePhageInjectionResolution(
   gameState: GameState,
-  events: EventLogEntry[]
+  events: EventLogEntry[],
+  kills: KillEvent[]
 ) {
   for (const colony of gameState.colonies) {
     if (colony.phageInjectionTurnsLeft !== null) {
       colony.phageInjectionTurnsLeft--;
       if (colony.phageInjectionTurnsLeft <= 0) {
+        const victimId = colony.playerId;
+        const colonyId = colony.id;
         colony.biomass = 0;
         events.push({
           turn: gameState.turn,
           type: 'attack',
           message: `玩家 ${getPlayerName(gameState, colony.playerId)} 的一个菌落因噬菌体注入而死亡！`,
           playerId: colony.playerId,
+          victimId: victimId,
+        });
+        kills.push({
+          turn: gameState.turn,
+          attackerPlayerId: 'phage',
+          victimPlayerId: victimId,
+          colonyId: colonyId,
         });
         colony.phageInjectionTurnsLeft = null;
       }
@@ -229,7 +242,8 @@ function phasePhageInjectionResolution(
 function phaseReproductionAndSpread(
   gameState: GameState,
   actions: PlayerAction[],
-  events: EventLogEntry[]
+  events: EventLogEntry[],
+  kills: KillEvent[]
 ) {
   const spreadActions = actions.filter((a) => a.actionType === 'spread');
   const pendingSpreads: Array<{
@@ -266,7 +280,7 @@ function phaseReproductionAndSpread(
     }
   }
 
-  resolveSpreadAttempts(gameState, pendingSpreads, events);
+  resolveSpreadAttempts(gameState, pendingSpreads, events, kills);
 }
 
 function getChemotaxisTargets(
@@ -328,7 +342,8 @@ function resolveSpreadAttempts(
     targetPos: Position;
     isPlayerAction: boolean;
   }>,
-  events: EventLogEntry[]
+  events: EventLogEntry[],
+  kills: KillEvent[]
 ) {
   const cellContestMap = new Map<string, Colony[]>();
 
@@ -366,9 +381,9 @@ function resolveSpreadAttempts(
         createOffspringColony(gameState, only, targetCell, events);
       }
     } else if (uniqueContestants.length === 2) {
-      resolveTwoWayCompetition(gameState, uniqueContestants[0], uniqueContestants[1], targetCell, events);
+      resolveTwoWayCompetition(gameState, uniqueContestants[0], uniqueContestants[1], targetCell, events, kills);
     } else if (uniqueContestants.length >= 3) {
-      resolveMultiWayCompetition(gameState, uniqueContestants.slice(0, 3), targetCell, events);
+      resolveMultiWayCompetition(gameState, uniqueContestants.slice(0, 3), targetCell, events, kills);
     }
   }
 }
@@ -446,7 +461,8 @@ function resolveTwoWayCompetition(
   c1: Colony,
   c2: Colony,
   cell: Cell,
-  events: EventLogEntry[]
+  events: EventLogEntry[],
+  kills: KillEvent[]
 ) {
   const p1 = getPlayer(gameState, c1.playerId);
   const p2 = getPlayer(gameState, c2.playerId);
@@ -485,6 +501,8 @@ function resolveTwoWayCompetition(
 
   if (comp1 >= comp2 * 3) {
     const biomassLoss = c2.biomass;
+    const c2Id = c2.id;
+    const c2Owner = c2.playerId;
     c2.biomass = 0;
     c1.biomass *= 0.7;
     events.push({
@@ -492,6 +510,14 @@ function resolveTwoWayCompetition(
       type: 'attack',
       message: `${p1?.name || c1.playerId} 的菌落压倒性击败了 ${p2?.name || c2.playerId}！`,
       playerId: c1.playerId,
+      attackerId: c1.playerId,
+      victimId: c2Owner,
+    });
+    kills.push({
+      turn: gameState.turn,
+      attackerPlayerId: c1.playerId,
+      victimPlayerId: c2Owner,
+      colonyId: c2Id,
     });
     if (cell.colony === c2) {
       cell.colony = null;
@@ -516,6 +542,8 @@ function resolveTwoWayCompetition(
     }
   } else if (comp2 >= comp1 * 3) {
     const biomassLoss = c1.biomass;
+    const c1Id = c1.id;
+    const c1Owner = c1.playerId;
     c1.biomass = 0;
     c2.biomass *= 0.7;
     events.push({
@@ -523,6 +551,14 @@ function resolveTwoWayCompetition(
       type: 'attack',
       message: `${p2?.name || c2.playerId} 的菌落压倒性击败了 ${p1?.name || c1.playerId}！`,
       playerId: c2.playerId,
+      attackerId: c2.playerId,
+      victimId: c1Owner,
+    });
+    kills.push({
+      turn: gameState.turn,
+      attackerPlayerId: c2.playerId,
+      victimPlayerId: c1Owner,
+      colonyId: c1Id,
     });
     if (cell.colony === c1) {
       cell.colony = null;
@@ -628,7 +664,8 @@ function resolveMultiWayCompetition(
   gameState: GameState,
   contestants: Colony[],
   cell: Cell,
-  events: EventLogEntry[]
+  events: EventLogEntry[],
+  kills: KillEvent[]
 ) {
   for (let i = 0; i < contestants.length; i++) {
     for (let j = i + 1; j < contestants.length; j++) {
@@ -713,7 +750,8 @@ function phageAttemptInjection(
 function phaseAttackResolution(
   gameState: GameState,
   actions: PlayerAction[],
-  events: EventLogEntry[]
+  events: EventLogEntry[],
+  kills: KillEvent[]
 ) {
   const attackActions = actions.filter(
     (a) => a.actionType === 'attack' && a.colonyId && a.targetPosition
@@ -735,7 +773,7 @@ function phaseAttackResolution(
 
     if (dist > 2) continue;
 
-    executeAttack(gameState, attackerColony, targetCell, events);
+    executeAttack(gameState, attackerColony, targetCell, events, kills);
   }
 
   for (const colony of gameState.colonies) {
@@ -744,7 +782,7 @@ function phaseAttackResolution(
       drainSurroundingNutrients(gameState, colony);
     } else if (colony.properties.attackType === 'toxin' && colony.biomass >= colony.maxBiomass * 0.7) {
       if (Math.random() < 0.15) {
-        aoeToxinAttack(gameState, colony, events);
+        aoeToxinAttack(gameState, colony, events, kills);
       }
     }
   }
@@ -754,7 +792,8 @@ function executeAttack(
   gameState: GameState,
   attacker: Colony,
   targetCell: Cell,
-  events: EventLogEntry[]
+  events: EventLogEntry[],
+  kills: KillEvent[]
 ) {
   if (!targetCell.colony) return;
   if (targetCell.colony.playerId === attacker.playerId) return;
@@ -763,11 +802,11 @@ function executeAttack(
 
   switch (attacker.properties.attackType) {
     case 'toxin': {
-      aoeToxinAttack(gameState, attacker, events);
+      aoeToxinAttack(gameState, attacker, events, kills);
       break;
     }
     case 'lysozyme': {
-      singleTargetAttack(gameState, attacker, defender, events);
+      singleTargetAttack(gameState, attacker, defender, events, kills);
       break;
     }
     case 'phage_injection': {
@@ -785,7 +824,8 @@ function executeAttack(
 function aoeToxinAttack(
   gameState: GameState,
   attacker: Colony,
-  events: EventLogEntry[]
+  events: EventLogEntry[],
+  kills: KillEvent[]
 ) {
   const p = getPlayer(gameState, attacker.playerId);
   for (let dy = -1; dy <= 1; dy++) {
@@ -799,6 +839,9 @@ function aoeToxinAttack(
       if (!cell.colony || cell.colony.playerId === attacker.playerId) continue;
 
       const defender = cell.colony;
+      const prevBiomass = defender.biomass;
+      const defenderId = defender.id;
+      const defenderOwner = defender.playerId;
       let damage = attacker.properties.attackPower * (attacker.biomass / 50) * 0.6;
 
       if (defender.biofilmLayers > 0) {
@@ -809,6 +852,23 @@ function aoeToxinAttack(
 
       defender.biomass = Math.max(0, defender.biomass - damage);
       defender.timesAttackedRecently++;
+
+      if (prevBiomass > 0 && defender.biomass <= 0) {
+        events.push({
+          turn: gameState.turn,
+          type: 'attack',
+          message: `${p?.name || attacker.playerId} 的毒素攻击消灭了一个敌方菌落！`,
+          playerId: attacker.playerId,
+          attackerId: attacker.playerId,
+          victimId: defenderOwner,
+        });
+        kills.push({
+          turn: gameState.turn,
+          attackerPlayerId: attacker.playerId,
+          victimPlayerId: defenderOwner,
+          colonyId: defenderId,
+        });
+      }
     }
   }
 
@@ -819,8 +879,12 @@ function singleTargetAttack(
   gameState: GameState,
   attacker: Colony,
   defender: Colony,
-  events: EventLogEntry[]
+  events: EventLogEntry[],
+  kills: KillEvent[]
 ) {
+  const prevBiomass = defender.biomass;
+  const defenderId = defender.id;
+  const defenderOwner = defender.playerId;
   let damage = attacker.properties.attackPower * (attacker.biomass / 50) * 1.5;
 
   const fit = calculateEnvironmentFitness(
@@ -855,6 +919,17 @@ function singleTargetAttack(
       type: 'attack',
       message: `${getPlayerName(gameState, attacker.playerId)} 的原生动物吞噬了一个敌方菌落！`,
       playerId: attacker.playerId,
+      attackerId: attacker.playerId,
+      victimId: defenderOwner,
+    });
+  }
+
+  if (prevBiomass > 0 && defender.biomass <= 0) {
+    kills.push({
+      turn: gameState.turn,
+      attackerPlayerId: attacker.playerId,
+      victimPlayerId: defenderOwner,
+      colonyId: defenderId,
     });
   }
 

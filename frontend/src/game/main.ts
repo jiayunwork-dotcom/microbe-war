@@ -12,6 +12,12 @@ import {
   TacticalMarker,
   MarkerType,
   Alliance,
+  ReplayData,
+  ReplayListItem,
+  PlayerStats,
+  GameStats,
+  TurnAction,
+  AllianceEvent,
 } from './types.js';
 import { GameWebSocket } from './network.js';
 import { DishRenderer, RenderAnimation } from './renderer.js';
@@ -26,6 +32,7 @@ const MICROBE_NAMES: Record<MicrobeType, string> = {
 class GameController {
   private network: GameWebSocket;
   private renderer: DishRenderer | null = null;
+  private replayRenderer: DishRenderer | null = null;
 
   private roomId: string = '';
   private myPlayerId: string = '';
@@ -37,6 +44,13 @@ class GameController {
   private markerMode: MarkerType | null = null;
   private alliances: Alliance[] = [];
   private pendingAllianceFrom: string | null = null;
+
+  private currentReplay: ReplayData | null = null;
+  private replayTurn: number = 0;
+  private isPlaying: boolean = false;
+  private playbackSpeed: number = 1;
+  private playbackTimer: number | null = null;
+  private latestStats: GameStats | null = null;
 
   constructor() {
     this.network = new GameWebSocket();
@@ -180,6 +194,23 @@ class GameController {
       this.alliances = payload.alliances || [];
       this.updatePlayerStats();
     });
+
+    this.network.on('game_ended_with_stats', (payload) => {
+      if (payload.replayData) {
+        this.currentReplay = payload.replayData;
+        this.latestStats = payload.replayData.stats;
+      }
+    });
+
+    this.network.on('replay_data', (payload) => {
+      this.currentReplay = payload;
+      this.latestStats = payload.stats;
+      this.startReplayPlayer();
+    });
+
+    this.network.on('replay_list', (payload) => {
+      console.log('Replay list:', payload.replays);
+    });
   }
 
   private setupUIHandlers() {
@@ -317,6 +348,38 @@ class GameController {
       const modal = document.getElementById('alliance-request-modal');
       if (modal) modal.style.display = 'none';
     });
+
+    document.getElementById('btn-watch-replay')?.addEventListener('click', () => {
+      if (this.currentReplay) {
+        this.startReplayPlayer();
+      }
+    });
+
+    document.getElementById('btn-exit-replay')?.addEventListener('click', () => {
+      this.stopReplay();
+      this.showScreen('result-screen');
+    });
+
+    document.getElementById('btn-replay-play')?.addEventListener('click', () => {
+      this.toggleReplayPlay();
+    });
+
+    document.querySelectorAll('.btn-speed').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const target = e.currentTarget as HTMLElement;
+        const speed = parseInt(target.dataset.speed || '1', 10);
+        this.setPlaybackSpeed(speed);
+      });
+    });
+
+    const replayProgress = document.getElementById('replay-progress') as HTMLInputElement;
+    if (replayProgress) {
+      replayProgress.addEventListener('input', (e) => {
+        const target = e.target as HTMLInputElement;
+        const turn = parseInt(target.value, 10);
+        this.seekToTurn(turn);
+      });
+    }
   }
 
   private sendChatFromInput(inputId: string) {
@@ -518,7 +581,13 @@ class GameController {
           <span>房主: ${this.escapeHtml(r.hostName)}</span>
           ${r.turn !== undefined ? `<span>回合: ${r.turn}</span>` : ''}
         </div>
-        <button class="btn btn-small room-item-join" data-room-id="${r.id}">快速加入</button>
+        <div class="room-item-actions">
+          ${r.status === 'finished' ? `
+            <button class="btn btn-small btn-replay-room" data-room-id="${r.id}">查看回放</button>
+          ` : `
+            <button class="btn btn-small room-item-join" data-room-id="${r.id}">快速加入</button>
+          `}
+        </div>
       </div>
     `
       )
@@ -530,6 +599,16 @@ class GameController {
         const roomId = target.dataset.roomId;
         if (roomId) {
           (document.getElementById('room-id-join') as HTMLInputElement).value = roomId;
+        }
+      });
+    });
+
+    listEl.querySelectorAll('.btn-replay-room').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const target = e.currentTarget as HTMLElement;
+        const roomId = target.dataset.roomId;
+        if (roomId) {
+          this.requestReplayByRoomId(roomId);
         }
       });
     });
@@ -1031,12 +1110,491 @@ class GameController {
       `;
       })
       .join('');
+
+    if (this.latestStats) {
+      this.renderStatsPanel(this.latestStats);
+    }
+  }
+
+  private renderStatsPanel(stats: GameStats) {
+    const globalStatsEl = document.getElementById('global-stats');
+    const playerStatsEl = document.getElementById('player-stats-detail');
+    if (!globalStatsEl || !playerStatsEl) return;
+
+    globalStatsEl.innerHTML = `
+      <div class="global-stat-item">
+        <span class="stat-label">总回合数</span>
+        <span class="stat-value">${stats.totalTurns}</span>
+      </div>
+      <div class="global-stat-item">
+        <span class="stat-label">最激烈回合</span>
+        <span class="stat-value">第${stats.mostViolentTurn.turn}回合 (击杀${stats.mostViolentTurn.killCount}个)</span>
+      </div>
+      <div class="global-stat-item mvp">
+        <span class="stat-label">👑 MVP</span>
+        <span class="stat-value">
+          ${stats.mvp ? `${stats.mvp.playerName} (${stats.mvp.score.toFixed(1)}分)` : '暂无'}
+        </span>
+      </div>
+    `;
+
+    playerStatsEl.innerHTML = stats.playerStats
+      .map((ps) => `
+      <div class="player-stat-card" style="border-left: 4px solid ${ps.playerColor}">
+        <div class="player-stat-header">
+          <span class="player-stat-name" style="color:${ps.playerColor}">
+            ${this.escapeHtml(ps.playerName)}
+          </span>
+          <span class="player-stat-rank">#${ps.finalRank}</span>
+        </div>
+        <div class="player-stat-grid">
+          <div class="stat-cell">
+            <span class="stat-cell-label">扩散</span>
+            <span class="stat-cell-value">${ps.totalSpreadCount}</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-cell-label">攻击</span>
+            <span class="stat-cell-value">${ps.totalAttackCount}</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-cell-label">进化</span>
+            <span class="stat-cell-value">${ps.totalEvolveCount}</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-cell-label">击杀</span>
+            <span class="stat-cell-value kill">${ps.kills}</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-cell-label">被击杀</span>
+            <span class="stat-cell-value death">${ps.deaths}</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-cell-label">最大领地</span>
+            <span class="stat-cell-value">${ps.maxAreaPeak}</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-cell-label">存活回合</span>
+            <span class="stat-cell-value">${ps.survivalTurns}</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-cell-label">结盟</span>
+            <span class="stat-cell-value">${ps.allianceCount}</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-cell-label">背叛</span>
+            <span class="stat-cell-value betrayal">${ps.betrayalCount}</span>
+          </div>
+        </div>
+      </div>
+    `)
+    .join('');
+
+    this.drawAreaChart(stats);
+  }
+
+  private drawAreaChart(stats: GameStats) {
+    const canvas = document.getElementById('area-chart-canvas') as HTMLCanvasElement;
+    if (!canvas || !stats.areaHistory.length) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = canvas.width;
+    const height = canvas.height;
+    const padding = { top: 30, right: 20, bottom: 40, left: 50 };
+    const chartWidth = width - padding.left - padding.right;
+    const chartHeight = height - padding.top - padding.bottom;
+
+    ctx.clearRect(0, 0, width, height);
+
+    const maxTurn = Math.max(...stats.areaHistory.map((h) => h.turn));
+    const maxArea = Math.max(
+      ...stats.areaHistory.flatMap((h) => Object.values(h.areas))
+    );
+
+    ctx.strokeStyle = '#e0e0e0';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 5; i++) {
+      const y = padding.top + (chartHeight / 5) * i;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(width - padding.right, y);
+      ctx.stroke();
+
+      const value = Math.round(maxArea - (maxArea / 5) * i);
+      ctx.fillStyle = '#666';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(String(value), padding.left - 10, y + 4);
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(padding.left, padding.top);
+    ctx.lineTo(padding.left, height - padding.bottom);
+    ctx.lineTo(width - padding.right, height - padding.bottom);
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    const players = stats.playerStats.map((ps) => ({
+      id: ps.playerId,
+      name: ps.playerName,
+      color: ps.playerColor,
+    }));
+
+    for (const player of players) {
+      ctx.beginPath();
+      ctx.strokeStyle = player.color;
+      ctx.lineWidth = 2;
+
+      let started = false;
+      for (let i = 0; i < stats.areaHistory.length; i++) {
+        const history = stats.areaHistory[i];
+        const area = history.areas[player.id] || 0;
+        const x = padding.left + (history.turn / maxTurn) * chartWidth;
+        const y = padding.top + chartHeight - (area / maxArea) * chartHeight;
+
+        if (!started) {
+          ctx.moveTo(x, y);
+          started = true;
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      ctx.stroke();
+
+      const lastHistory = stats.areaHistory[stats.areaHistory.length - 1];
+      const lastArea = lastHistory.areas[player.id] || 0;
+      const lastX = padding.left + (lastHistory.turn / maxTurn) * chartWidth;
+      const lastY = padding.top + chartHeight - (lastArea / maxArea) * chartHeight;
+
+      ctx.beginPath();
+      ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
+      ctx.fillStyle = player.color;
+      ctx.fill();
+    }
+
+    ctx.fillStyle = '#333';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    for (let i = 0; i <= maxTurn; i += Math.ceil(maxTurn / 10)) {
+      const x = padding.left + (i / maxTurn) * chartWidth;
+      ctx.fillText(String(i), x, height - padding.bottom + 20);
+    }
+
+    ctx.fillText('回合数', width / 2, height - 10);
+    ctx.save();
+    ctx.translate(15, height / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('领地格子数', 0, 0);
+    ctx.restore();
+
+    const legendX = padding.left + 10;
+    let legendY = padding.top + 10;
+    for (const player of players) {
+      ctx.fillStyle = player.color;
+      ctx.fillRect(legendX, legendY, 12, 12);
+      ctx.fillStyle = '#333';
+      ctx.textAlign = 'left';
+      ctx.fillText(player.name, legendX + 20, legendY + 10);
+      legendY += 20;
+    }
   }
 
   private escapeHtml(s: string): string {
     const div = document.createElement('div');
     div.textContent = s;
     return div.innerHTML;
+  }
+
+  private requestReplayByRoomId(roomId: string) {
+    this.network.send({
+      type: 'request_replay',
+      payload: { roomId },
+    });
+  }
+
+  private startReplayPlayer() {
+    if (!this.currentReplay) return;
+
+    this.showScreen('replay-screen');
+
+    if (!this.replayRenderer) {
+      const canvas = document.getElementById('replay-canvas') as HTMLCanvasElement;
+      this.replayRenderer = new DishRenderer(canvas);
+      this.replayRenderer.setMyPlayerId('');
+    }
+
+    const roomNameEl = document.getElementById('replay-room-name');
+    const turnInfoEl = document.getElementById('replay-turn-info');
+    const progressEl = document.getElementById('replay-progress') as HTMLInputElement;
+
+    if (roomNameEl) roomNameEl.textContent = this.currentReplay.roomName;
+    if (turnInfoEl) {
+      turnInfoEl.textContent = `回合: 0 / ${this.currentReplay.stats.totalTurns}`;
+    }
+    if (progressEl) {
+      progressEl.max = String(this.currentReplay.stats.totalTurns);
+      progressEl.value = '0';
+    }
+
+    this.replayTurn = 0;
+    this.isPlaying = false;
+    this.updatePlayButton();
+    this.renderReplayTurn(0);
+    this.updateReplayChat(0);
+  }
+
+  private renderReplayTurn(turn: number) {
+    if (!this.currentReplay || !this.replayRenderer) return;
+
+    const snapshot = this.currentReplay.turnSnapshots[turn];
+    if (!snapshot) return;
+
+    const replayGameState: GameState = {
+      id: this.currentReplay.gameId,
+      status: 'playing',
+      turn: snapshot.turn,
+      maxTurns: this.currentReplay.maxTurns,
+      gridSize: this.currentReplay.gridSize,
+      grid: snapshot.gridSnapshot,
+      players: this.currentReplay.players,
+      colonies: snapshot.colonies,
+      globalEvents: [],
+      eventLog: [],
+      winnerId: null,
+      rankings: [],
+    };
+
+    this.replayRenderer.setGameState(replayGameState);
+
+    const markers = this.currentReplay.markers[turn] || [];
+    this.replayRenderer.setMarkers(markers);
+
+    const turnInfoEl = document.getElementById('replay-turn-info');
+    const progressLabelEl = document.getElementById('replay-progress-label');
+    if (turnInfoEl) {
+      turnInfoEl.textContent = `回合: ${turn} / ${this.currentReplay.stats.totalTurns}`;
+    }
+    if (progressLabelEl) {
+      progressLabelEl.textContent = String(turn);
+    }
+
+    this.updateReplayEventPanel(turn);
+    this.updateReplayPlayerStats(snapshot);
+  }
+
+  private updateReplayEventPanel(turn: number) {
+    const panel = document.getElementById('replay-event-panel');
+    if (!panel || !this.currentReplay) return;
+
+    const events = this.currentReplay.turnEvents[turn] || [];
+    const actions = this.currentReplay.turnActions.filter((a) => a.turn === turn);
+    const alliances = this.currentReplay.allianceEvents.filter((a) => a.turn === turn);
+
+    if (events.length === 0 && actions.length === 0 && alliances.length === 0) {
+      panel.innerHTML = '<div class="replay-event-empty">本回合无重大事件</div>';
+      return;
+    }
+
+    let html = '';
+
+    for (const action of actions) {
+      const player = this.currentReplay.players.find((p) => p.id === action.playerId);
+      const actionName = action.actionType === 'spread' ? '扩散' : action.actionType === 'attack' ? '攻击' : '进化';
+      const targetStr = action.targetPosition
+        ? ` (${action.targetPosition.x},${action.targetPosition.y})`
+        : '';
+      html += `
+        <div class="replay-event action">
+          <span class="event-player" style="color:${player?.color}">${player?.name}</span>
+          <span class="event-action">${actionName}</span>
+          <span class="event-target">${targetStr}</span>
+        </div>
+      `;
+    }
+
+    for (const alliance of alliances) {
+      const p1 = this.currentReplay.players.find((p) => p.id === alliance.playerId1);
+      const p2 = this.currentReplay.players.find((p) => p.id === alliance.playerId2);
+      if (alliance.type === 'formed') {
+        html += `
+          <div class="replay-event alliance">
+            🤝 <span style="color:${p1?.color}">${p1?.name}</span> 与
+            <span style="color:${p2?.color}">${p2?.name}</span> 结成联盟
+          </div>
+        `;
+      } else {
+        const betrayer = this.currentReplay.players.find((p) => p.id === alliance.betrayerId);
+        const victim =
+          alliance.betrayerId === alliance.playerId1 ? p2 : p1;
+        html += `
+          <div class="replay-event betrayal">
+            💔 <span style="color:${betrayer?.color}">${betrayer?.name}</span> 背叛了
+            <span style="color:${victim?.color}">${victim?.name}</span>
+          </div>
+        `;
+      }
+    }
+
+    for (const event of events) {
+      const typeClass = `type-${event.type}`;
+      html += `
+        <div class="replay-event ${typeClass}">
+          ${event.message}
+        </div>
+      `;
+    }
+
+    panel.innerHTML = html;
+  }
+
+  private updateReplayPlayerStats(snapshot: { playerAreas: Record<string, number> }) {
+    const statsEl = document.getElementById('replay-player-stats');
+    if (!statsEl || !this.currentReplay) return;
+
+    const players = this.currentReplay.players.filter((p) => !p.isSpectator);
+    const sorted = [...players].sort((a, b) => {
+      const areaA = snapshot.playerAreas[a.id] || 0;
+      const areaB = snapshot.playerAreas[b.id] || 0;
+      return areaB - areaA;
+    });
+
+    statsEl.innerHTML = sorted
+      .map((p, idx) => {
+        const area = snapshot.playerAreas[p.id] || 0;
+        return `
+          <div class="replay-stat-item">
+            <span class="replay-stat-rank">#${idx + 1}</span>
+            <span class="replay-stat-color" style="background:${p.color}"></span>
+            <span class="replay-stat-name">${this.escapeHtml(p.name)}</span>
+            <span class="replay-stat-area">领地: ${area}</span>
+          </div>
+        `;
+      })
+      .join('');
+  }
+
+  private updateReplayChat(currentTurn: number) {
+    const chatEl = document.getElementById('replay-chat');
+    if (!chatEl || !this.currentReplay) return;
+
+    const messages = this.currentReplay.chatMessages.filter((msg) => {
+      const msgTurn = this.getTurnForTimestamp(msg.timestamp);
+      return msgTurn <= currentTurn;
+    });
+
+    chatEl.innerHTML = messages
+      .map((msg) => {
+        const time = new Date(msg.timestamp);
+        const timeStr = `${time.getHours().toString().padStart(2, '0')}:${time.getMinutes().toString().padStart(2, '0')}`;
+        if (msg.isSystem) {
+          return `<div class="chat-msg system">${this.escapeHtml(msg.content)}</div>`;
+        }
+        return `
+          <div class="chat-msg">
+            <span class="chat-msg-name" style="color:${msg.playerColor}">${this.escapeHtml(msg.playerName)}</span>
+            ${this.escapeHtml(msg.content)}
+            <span class="chat-msg-time">${timeStr}</span>
+          </div>
+        `;
+      })
+      .join('');
+
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+
+  private getTurnForTimestamp(timestamp: number): number {
+    if (!this.currentReplay) return 0;
+    const duration = this.currentReplay.endTime - this.currentReplay.startTime;
+    const totalTurns = this.currentReplay.stats.totalTurns;
+    const elapsed = timestamp - this.currentReplay.startTime;
+    return Math.min(totalTurns, Math.max(0, Math.floor((elapsed / duration) * totalTurns)));
+  }
+
+  private toggleReplayPlay() {
+    this.isPlaying = !this.isPlaying;
+    this.updatePlayButton();
+
+    if (this.isPlaying) {
+      this.startPlayback();
+    } else {
+      this.stopPlayback();
+    }
+  }
+
+  private updatePlayButton() {
+    const iconEl = document.getElementById('replay-play-icon');
+    const textEl = document.getElementById('replay-play-text');
+    if (iconEl) iconEl.textContent = this.isPlaying ? '⏸' : '▶';
+    if (textEl) textEl.textContent = this.isPlaying ? '暂停' : '播放';
+  }
+
+  private startPlayback() {
+    if (this.playbackTimer) {
+      clearInterval(this.playbackTimer);
+    }
+
+    const baseInterval = 1000;
+    const interval = baseInterval / this.playbackSpeed;
+
+    this.playbackTimer = window.setInterval(() => {
+      if (!this.currentReplay) return;
+
+      if (this.replayTurn >= this.currentReplay.stats.totalTurns) {
+        this.stopPlayback();
+        this.isPlaying = false;
+        this.updatePlayButton();
+        return;
+      }
+
+      this.replayTurn++;
+      this.seekToTurn(this.replayTurn);
+    }, interval);
+  }
+
+  private stopPlayback() {
+    if (this.playbackTimer) {
+      clearInterval(this.playbackTimer);
+      this.playbackTimer = null;
+    }
+  }
+
+  private setPlaybackSpeed(speed: number) {
+    this.playbackSpeed = speed;
+
+    document.querySelectorAll('.btn-speed').forEach((btn) => {
+      const el = btn as HTMLElement;
+      el.classList.toggle('active', parseInt(el.dataset.speed || '1', 10) === speed);
+    });
+
+    if (this.isPlaying) {
+      this.stopPlayback();
+      this.startPlayback();
+    }
+  }
+
+  private seekToTurn(turn: number) {
+    if (!this.currentReplay) return;
+
+    this.replayTurn = Math.max(0, Math.min(turn, this.currentReplay.stats.totalTurns));
+
+    const progressEl = document.getElementById('replay-progress') as HTMLInputElement;
+    if (progressEl) {
+      progressEl.value = String(this.replayTurn);
+    }
+
+    this.renderReplayTurn(this.replayTurn);
+    this.updateReplayChat(this.replayTurn);
+  }
+
+  private stopReplay() {
+    this.stopPlayback();
+    this.isPlaying = false;
+    if (this.replayRenderer) {
+      this.replayRenderer.destroy();
+      this.replayRenderer = null;
+    }
   }
 }
 

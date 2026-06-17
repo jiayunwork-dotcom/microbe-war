@@ -155,7 +155,9 @@ export type ClientMessageType =
   | 'send_chat'
   | 'place_marker'
   | 'alliance_request'
-  | 'alliance_respond';
+  | 'alliance_respond'
+  | 'request_replay'
+  | 'request_replay_list';
 
 export type ServerMessageType =
   | 'room_created'
@@ -179,7 +181,10 @@ export type ServerMessageType =
   | 'alliance_request_received'
   | 'alliance_formed'
   | 'alliance_broken'
-  | 'alliances_update';
+  | 'alliances_update'
+  | 'replay_data'
+  | 'replay_list'
+  | 'game_ended_with_stats';
 
 export interface ClientMessage {
   type: ClientMessageType;
@@ -189,4 +194,114 @@ export interface ClientMessage {
 export interface ServerMessage {
   type: ServerMessageType;
   payload?: any;
+}
+
+export interface KillEvent {
+  turn: number;
+  attackerPlayerId: string;
+  victimPlayerId: string;
+  colonyId: string;
+}
+
+export interface TurnSnapshot {
+  turn: number;
+  gridSnapshot: Cell[][];
+  colonies: Colony[];
+  playerAreas: Record<string, number>;
+}
+
+export interface TurnAction {
+  turn: number;
+  playerId: string;
+  actionType: ActionType;
+  colonyId?: string;
+  targetPosition?: Position;
+  targetPlayerId?: string;
+}
+
+export interface AllianceEvent {
+  turn: number;
+  type: 'formed' | 'broken';
+  playerId1: string;
+  playerId2: string;
+  betrayerId?: string;
+}
+
+export interface PlayerStats {
+  playerId: string;
+  playerName: string;
+  playerColor: string;
+  microbeType: MicrobeType;
+  totalSpreadCount: number;
+  totalAttackCount: number;
+  totalEvolveCount: number;
+  kills: number;
+  deaths: number;
+  maxAreaPeak: number;
+  survivalTurns: number;
+  allianceCount: number;
+  betrayalCount: number;
+  finalRank: number;
+  finalArea: number;
+  finalWeightedArea: number;
+}
+
+export interface GameStats {
+  totalTurns: number;
+  mostViolentTurn: {
+    turn: number;
+    killCount: number;
+  };
+  mvp: {
+    playerId: string;
+    playerName: string;
+    score: number;
+  } | null;
+  playerStats: PlayerStats[];
+  areaHistory: Array<{
+    turn: number;
+    areas: Record<string, number>;
+  }>;
+}
+
+export interface ReplayData {
+  replayId: string;
+  roomId: string;
+  roomName: string;
+  gameId: string;
+  startTime: number;
+  endTime: number;
+  maxTurns: number;
+  gridSize: number;
+  players: Player[];
+  initialState: {
+    grid: Cell[][];
+    colonies: Colony[];
+    turn: number;
+  };
+  turnSnapshots: TurnSnapshot[];
+  turnActions: TurnAction[];
+  turnEvents: EventLogEntry[][];
+  allianceEvents: AllianceEvent[];
+  chatMessages: ChatMessage[];
+  markers: TacticalMarker[][];
+  finalRankings: Array<{
+    playerId: string;
+    area: number;
+    weightedArea: number;
+  }>;
+  winnerId: string | null;
+  stats: GameStats;
+}
+
+export interface ReplayListItem {
+  replayId: string;
+  roomId: string;
+  roomName: string;
+  startTime: number;
+  endTime: number;
+  totalTurns: number;
+  playerCount: number;
+  winnerName: string | null;
+  winnerColor: string | null;
 }

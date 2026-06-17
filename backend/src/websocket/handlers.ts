@@ -332,6 +332,32 @@ export function setupWebSocketHandlers(
           break;
         }
 
+        case 'request_replay': {
+          const { replayId, roomId }: { replayId?: string; roomId?: string } = msg.payload || {};
+          let replayData = null;
+          if (replayId) {
+            replayData = roomManager.getReplay(replayId);
+          } else if (roomId) {
+            replayData = roomManager.getReplayByRoomId(roomId);
+          }
+          if (!replayData) {
+            return sendError(cid, '未找到回放数据');
+          }
+          roomManager.sendToClient(cid, {
+            type: 'replay_data',
+            payload: replayData,
+          });
+          break;
+        }
+
+        case 'request_replay_list': {
+          roomManager.sendToClient(cid, {
+            type: 'replay_list',
+            payload: { replays: roomManager.getReplayList() },
+          });
+          break;
+        }
+
         default: {
           sendError(cid, '未知消息类型: ' + msg.type);
         }
