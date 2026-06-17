@@ -21,6 +21,9 @@ export interface CustomMapData {
   gridSize: number;
   terrain: TerrainType[][];
   spawnPoints: Position[];
+  thumbnail?: string;
+  likeCount?: number;
+  likedBy?: string[];
 }
 
 export interface MapListItem {
@@ -28,7 +31,69 @@ export interface MapListItem {
   name: string;
   createdAt: number;
   spawnCount: number;
+  thumbnail?: string;
+  likeCount?: number;
+  likedBy?: string[];
+  isLiked?: boolean;
 }
+
+export type MapPresetType = 'arena' | 'maze' | 'toxic_swamp';
+
+export type ClientMessageType =
+  | 'create_room'
+  | 'join_room'
+  | 'leave_room'
+  | 'start_game'
+  | 'submit_action'
+  | 'submit_turn'
+  | 'request_rooms'
+  | 'toggle_spectator'
+  | 'ping'
+  | 'send_chat'
+  | 'place_marker'
+  | 'alliance_request'
+  | 'alliance_respond'
+  | 'request_replay'
+  | 'request_replay_list'
+  | 'list_maps'
+  | 'validate_map'
+  | 'save_map'
+  | 'get_map'
+  | 'set_room_map'
+  | 'like_map';
+
+export type ServerMessageType =
+  | 'room_created'
+  | 'room_joined'
+  | 'room_left'
+  | 'room_list'
+  | 'player_joined'
+  | 'player_left'
+  | 'game_started'
+  | 'game_state'
+  | 'turn_ended'
+  | 'turn_result'
+  | 'action_result'
+  | 'game_ended'
+  | 'error'
+  | 'pong'
+  | 'spectator_toggled'
+  | 'chat_message'
+  | 'marker_placed'
+  | 'marker_removed'
+  | 'alliance_request_received'
+  | 'alliance_formed'
+  | 'alliance_broken'
+  | 'alliances_update'
+  | 'replay_data'
+  | 'replay_list'
+  | 'game_ended_with_stats'
+  | 'map_saved'
+  | 'map_list'
+  | 'map_data'
+  | 'map_validation'
+  | 'room_updated'
+  | 'map_liked';
 
 export interface MapValidationResult {
   valid: boolean;
@@ -172,59 +237,6 @@ export interface ChatMessage {
   isSystem: boolean;
 }
 
-export type ClientMessageType =
-  | 'create_room'
-  | 'join_room'
-  | 'leave_room'
-  | 'start_game'
-  | 'submit_action'
-  | 'submit_turn'
-  | 'request_rooms'
-  | 'toggle_spectator'
-  | 'ping'
-  | 'send_chat'
-  | 'place_marker'
-  | 'alliance_request'
-  | 'alliance_respond'
-  | 'request_replay'
-  | 'request_replay_list'
-  | 'list_maps'
-  | 'validate_map'
-  | 'save_map'
-  | 'get_map'
-  | 'set_room_map';
-
-export type ServerMessageType =
-  | 'room_created'
-  | 'room_joined'
-  | 'room_left'
-  | 'room_list'
-  | 'player_joined'
-  | 'player_left'
-  | 'game_started'
-  | 'game_state'
-  | 'turn_ended'
-  | 'turn_result'
-  | 'action_result'
-  | 'game_ended'
-  | 'error'
-  | 'pong'
-  | 'spectator_toggled'
-  | 'chat_message'
-  | 'marker_placed'
-  | 'marker_removed'
-  | 'alliance_request_received'
-  | 'alliance_formed'
-  | 'alliance_broken'
-  | 'alliances_update'
-  | 'replay_data'
-  | 'replay_list'
-  | 'game_ended_with_stats'
-  | 'map_saved'
-  | 'map_list'
-  | 'map_data'
-  | 'map_validation'
-  | 'room_updated';
 
 export interface ClientMessage {
   type: ClientMessageType;

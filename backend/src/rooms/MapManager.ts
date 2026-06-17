@@ -11,6 +11,8 @@ const MAX_MAPS = 50;
 const MIN_SPAWN_DISTANCE = 8;
 const MAX_BARRIER_PERCENTAGE = 0.30;
 const TOXIN_DAMAGE_PER_TURN = 2;
+const THUMBNAIL_SIZE = 64;
+const MAX_HISTORY = 50;
 
 export { TOXIN_DAMAGE_PER_TURN };
 
@@ -19,7 +21,18 @@ export interface MapListItem {
   name: string;
   createdAt: number;
   spawnCount: number;
+  thumbnail?: string;
+  likeCount?: number;
+  likedBy?: string[];
 }
+
+const TERRAIN_COLORS_HEX: Record<TerrainType, [number, number, number]> = {
+  normal: [212, 196, 168],
+  high_nutrient: [124, 179, 66],
+  barren: [161, 136, 127],
+  toxin: [142, 36, 170],
+  barrier: [55, 71, 79],
+};
 
 export class MapManager {
   private maps: Map<string, CustomMapData> = new Map();
@@ -186,10 +199,14 @@ export class MapManager {
     if (!validation.valid) return null;
 
     const mapId = 'map_' + uuidv4().slice(0, 8);
+    const thumbnail = this.generateThumbnail(mapData.terrain, mapData.spawnPoints, mapData.gridSize);
     const fullMap: CustomMapData = {
       ...mapData,
       mapId,
       createdAt: Date.now(),
+      thumbnail,
+      likeCount: 0,
+      likedBy: [],
     };
 
     this.maps.set(mapId, fullMap);
@@ -198,6 +215,9 @@ export class MapManager {
       name: fullMap.name,
       createdAt: fullMap.createdAt,
       spawnCount: fullMap.spawnPoints.length,
+      thumbnail,
+      likeCount: 0,
+      likedBy: [],
     });
 
     if (this.mapList.length > MAX_MAPS) {
@@ -208,11 +228,99 @@ export class MapManager {
     return fullMap;
   }
 
+  likeMap(mapId: string, clientId: string): { likeCount: number; liked: boolean } | null {
+    const map = this.maps.get(mapId);
+    if (!map) return null;
+
+    if (!map.likedBy) map.likedBy = [];
+    if (!map.likeCount) map.likeCount = 0;
+
+    let liked = false;
+    if (map.likedBy.includes(clientId)) {
+      map.likedBy = map.likedBy.filter((c) => c !== clientId);
+      map.likeCount = Math.max(0, map.likeCount - 1);
+    } else {
+      map.likedBy.push(clientId);
+      map.likeCount += 1;
+      liked = true;
+    }
+
+    const listItem = this.mapList.find((m) => m.mapId === mapId);
+    if (listItem) {
+      listItem.likeCount = map.likeCount;
+      listItem.likedBy = [...map.likedBy];
+    }
+
+    this.sortMapList();
+    return { likeCount: map.likeCount, liked };
+  }
+
+  private sortMapList() {
+    this.mapList.sort((a, b) => {
+      const likeA = a.likeCount || 0;
+      const likeB = b.likeCount || 0;
+      if (likeB !== likeA) return likeB - likeA;
+      return b.createdAt - a.createdAt;
+    });
+  }
+
+  private generateThumbnail(
+    terrain: TerrainType[][],
+    spawnPoints: Position[],
+    gridSize: number
+  ): string {
+    const cellSize = Math.max(1, Math.floor(THUMBNAIL_SIZE / gridSize));
+    const actualSize = cellSize * gridSize;
+    const pixels: number[] = [];
+
+    for (let py = 0; py < THUMBNAIL_SIZE; py++) {
+      for (let px = 0; px < THUMBNAIL_SIZE; px++) {
+        if (px >= actualSize || py >= actualSize) {
+          pixels.push(15, 25, 35, 255);
+          continue;
+        }
+        const gx = Math.floor(px / cellSize);
+        const gy = Math.floor(py / cellSize);
+        const t = terrain[gy]?.[gx] || 'normal';
+        const color = TERRAIN_COLORS_HEX[t];
+        pixels.push(color[0], color[1], color[2], 255);
+      }
+    }
+
+    for (const sp of spawnPoints) {
+      const cx = sp.x * cellSize + Math.floor(cellSize / 2);
+      const cy = sp.y * cellSize + Math.floor(cellSize / 2);
+      const radius = Math.max(1, Math.floor(cellSize * 0.4));
+      for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          if (dx * dx + dy * dy <= radius * radius) {
+            const px = cx + dx;
+            const py = cy + dy;
+            if (px >= 0 && px < THUMBNAIL_SIZE && py >= 0 && py < THUMBNAIL_SIZE) {
+              const idx = (py * THUMBNAIL_SIZE + px) * 4;
+              pixels[idx] = 255;
+              pixels[idx + 1] = 255;
+              pixels[idx + 2] = 255;
+              pixels[idx + 3] = 255;
+            }
+          }
+        }
+      }
+    }
+
+    let binary = '';
+    for (let i = 0; i < pixels.length; i++) {
+      binary += String.fromCharCode(pixels[i]);
+    }
+    return Buffer.from(binary, 'binary').toString('base64');
+  }
+
   getMap(mapId: string): CustomMapData | null {
     return this.maps.get(mapId) || null;
   }
 
   getMapList(): MapListItem[] {
+    this.sortMapList();
     return [...this.mapList];
   }
 

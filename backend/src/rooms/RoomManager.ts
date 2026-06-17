@@ -575,6 +575,15 @@ export class RoomManager {
     }
   }
 
+  broadcastAll(message: ServerMessage) {
+    const data = JSON.stringify(message);
+    for (const client of this.clients.values()) {
+      if (client.ws.readyState === WebSocket.OPEN) {
+        client.ws.send(data);
+      }
+    }
+  }
+
   private serializeGameState(state: GameState): any {
     return state;
   }

@@ -437,6 +437,26 @@ export function setupWebSocketHandlers(
           break;
         }
 
+        case 'like_map': {
+          const { mapId }: { mapId: string } = msg.payload || {};
+          if (!mapId) {
+            return sendError(cid, '缺少地图ID');
+          }
+          const result = roomManager.mapManager.likeMap(mapId, cid);
+          if (!result) {
+            return sendError(cid, '未找到地图');
+          }
+          roomManager.sendToClient(cid, {
+            type: 'map_liked',
+            payload: { mapId, likeCount: result.likeCount, liked: result.liked },
+          });
+          roomManager.broadcastAll({
+            type: 'map_list',
+            payload: { maps: roomManager.mapManager.getMapList() },
+          });
+          break;
+        }
+
         default: {
           sendError(cid, '未知消息类型: ' + msg.type);
         }

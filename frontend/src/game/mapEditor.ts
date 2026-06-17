@@ -7,12 +7,14 @@ import {
   CustomMapData,
   MapListItem,
   MapValidationResult,
+  MapPresetType,
 } from './types.js';
 import { GameWebSocket } from './network.js';
 
 const GRID_SIZE = 30;
 const CANVAS_SIZE = 600;
 const CELL_SIZE = CANVAS_SIZE / GRID_SIZE;
+const MAX_HISTORY = 50;
 
 const TERRAIN_COLORS: Record<TerrainType, string> = {
   normal: '#d4c4a8',
@@ -31,6 +33,11 @@ const SPAWN_COLORS = [
   '#26c6da',
 ];
 
+interface HistoryEntry {
+  terrainChanges: Array<{ x: number; y: number; before: TerrainType; after: TerrainType }>;
+  spawnChanges: { before: Position[]; after: Position[] };
+}
+
 export class MapEditor {
   private network: GameWebSocket;
   private canvas: HTMLCanvasElement;
@@ -46,6 +53,10 @@ export class MapEditor {
 
   private isDrawing: boolean = false;
   private lastDrawnCells: Set<string> = new Set();
+  private currentStrokeChanges: Map<string, TerrainType> = new Map();
+
+  private historyStack: HistoryEntry[] = [];
+  private redoStack: HistoryEntry[] = [];
 
   constructor(canvas: HTMLCanvasElement, network: GameWebSocket) {
     this.canvas = canvas;
@@ -56,6 +67,7 @@ export class MapEditor {
     this.spawnPoints = [];
 
     this.setupCanvasListeners();
+    this.setupKeyboardListeners();
   }
 
   private createEmptyTerrain(): TerrainType[][] {
@@ -78,6 +90,91 @@ export class MapEditor {
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
+  private setupKeyboardListeners() {
+    document.addEventListener('keydown', (e) => {
+      const mapEditorScreen = document.getElementById('map-editor-screen');
+      if (!mapEditorScreen?.classList.contains('active')) return;
+      const isInput = (e.target as HTMLElement)?.tagName === 'INPUT' ||
+                      (e.target as HTMLElement)?.tagName === 'SELECT' ||
+                      (e.target as HTMLElement)?.tagName === 'TEXTAREA';
+      if (isInput) return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        this.undo();
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'Z'))) {
+        e.preventDefault();
+        this.redo();
+      }
+    });
+  }
+
+  private pushHistory(entry: HistoryEntry) {
+    this.historyStack.push(entry);
+    if (this.historyStack.length > MAX_HISTORY) {
+      this.historyStack.shift();
+    }
+    this.redoStack = [];
+    this.updateUndoRedoUI();
+  }
+
+  undo() {
+    if (this.historyStack.length === 0) return;
+    const entry = this.historyStack.pop()!;
+    this.redoStack.push(entry);
+
+    for (const change of entry.terrainChanges) {
+      this.terrain[change.y][change.x] = change.before;
+      if (change.before === 'barrier') {
+        this.spawnPoints = this.spawnPoints.filter(
+          (p) => !(p.x === change.x && p.y === change.y)
+        );
+      }
+    }
+    this.spawnPoints = entry.spawnChanges.before.map((p) => ({ ...p }));
+
+    this.updateSpawnCountUI();
+    this.checkSpawnWarnings();
+    this.render();
+    this.updateUndoRedoUI();
+  }
+
+  redo() {
+    if (this.redoStack.length === 0) return;
+    const entry = this.redoStack.pop()!;
+    this.historyStack.push(entry);
+
+    for (const change of entry.terrainChanges) {
+      this.terrain[change.y][change.x] = change.after;
+      if (change.after === 'barrier') {
+        this.spawnPoints = this.spawnPoints.filter(
+          (p) => !(p.x === change.x && p.y === change.y)
+        );
+      }
+    }
+    this.spawnPoints = entry.spawnChanges.after.map((p) => ({ ...p }));
+
+    this.updateSpawnCountUI();
+    this.checkSpawnWarnings();
+    this.render();
+    this.updateUndoRedoUI();
+  }
+
+  canUndo(): boolean {
+    return this.historyStack.length > 0;
+  }
+
+  canRedo(): boolean {
+    return this.redoStack.length > 0;
+  }
+
+  private updateUndoRedoUI() {
+    const undoBtn = document.getElementById('btn-undo') as HTMLButtonElement;
+    const redoBtn = document.getElementById('btn-redo') as HTMLButtonElement;
+    if (undoBtn) undoBtn.disabled = !this.canUndo();
+    if (redoBtn) redoBtn.disabled = !this.canRedo();
+  }
+
   private onMouseDown(e: MouseEvent) {
     const { x, y } = this.getGridCoords(e);
     if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) return;
@@ -85,6 +182,7 @@ export class MapEditor {
     if (this.editMode === 'terrain') {
       this.isDrawing = true;
       this.lastDrawnCells.clear();
+      this.currentStrokeChanges.clear();
       this.applyBrushAt(x, y);
     } else if (this.editMode === 'spawn') {
       this.handleSpawnClick(x, y, e.button === 2);
@@ -101,8 +199,26 @@ export class MapEditor {
   }
 
   private onMouseUp() {
+    if (this.isDrawing && this.currentStrokeChanges.size > 0) {
+      const beforeSpawn = this.spawnPoints.map((p) => ({ ...p }));
+      const terrainChanges: HistoryEntry['terrainChanges'] = [];
+      for (const [key, after] of this.currentStrokeChanges) {
+        const [xs, ys] = key.split(',');
+        const cx = parseInt(xs, 10);
+        const cy = parseInt(ys, 10);
+        terrainChanges.push({ x: cx, y: cy, before: after, after: this.terrain[cy][cx] });
+      }
+      terrainChanges.forEach((c) => {
+        const temp = c.before;
+        c.before = c.after;
+        c.after = temp;
+      });
+      const afterSpawn = this.spawnPoints.map((p) => ({ ...p }));
+      this.pushHistory({ terrainChanges, spawnChanges: { before: beforeSpawn, after: afterSpawn } });
+    }
     this.isDrawing = false;
     this.lastDrawnCells.clear();
+    this.currentStrokeChanges.clear();
   }
 
   private getGridCoords(e: MouseEvent): { x: number; y: number } {
@@ -136,6 +252,10 @@ export class MapEditor {
       if (this.lastDrawnCells.has(key)) continue;
       this.lastDrawnCells.add(key);
       if (this.editMode === 'terrain') {
+        const beforeTerrain = this.terrain[y][x];
+        if (!this.currentStrokeChanges.has(key)) {
+          this.currentStrokeChanges.set(key, beforeTerrain);
+        }
         this.terrain[y][x] = this.currentTerrain;
         if (this.currentTerrain === 'barrier') {
           this.spawnPoints = this.spawnPoints.filter(
@@ -185,35 +305,40 @@ export class MapEditor {
   }
 
   private handleSpawnClick(x: number, y: number, isRightClick: boolean) {
+    const beforeSpawn = this.spawnPoints.map((p) => ({ ...p }));
+    let changed = false;
+
     if (isRightClick) {
+      const originalLen = this.spawnPoints.length;
       this.spawnPoints = this.spawnPoints.filter(
         (p) => !(p.x === x && p.y === y)
       );
-      this.updateSpawnCountUI();
-      this.checkSpawnWarnings();
-      return;
+      changed = this.spawnPoints.length !== originalLen;
+    } else {
+      if (this.terrain[y][x] === 'barrier') {
+        this.showWarning('出生点不能放在屏障区上！');
+        return;
+      }
+
+      if (this.spawnPoints.some((p) => p.x === x && p.y === y)) {
+        this.spawnPoints = this.spawnPoints.filter(
+          (p) => !(p.x === x && p.y === y)
+        );
+        changed = true;
+      } else {
+        if (this.spawnPoints.length >= 6) {
+          this.showWarning('最多只能放置6个出生点！');
+          return;
+        }
+        this.spawnPoints.push({ x, y });
+        changed = true;
+      }
     }
 
-    if (this.terrain[y][x] === 'barrier') {
-      this.showWarning('出生点不能放在屏障区上！');
-      return;
+    if (changed) {
+      const afterSpawn = this.spawnPoints.map((p) => ({ ...p }));
+      this.pushHistory({ terrainChanges: [], spawnChanges: { before: beforeSpawn, after: afterSpawn } });
     }
-
-    if (this.spawnPoints.some((p) => p.x === x && p.y === y)) {
-      this.spawnPoints = this.spawnPoints.filter(
-        (p) => !(p.x === x && p.y === y)
-      );
-      this.updateSpawnCountUI();
-      this.checkSpawnWarnings();
-      return;
-    }
-
-    if (this.spawnPoints.length >= 6) {
-      this.showWarning('最多只能放置6个出生点！');
-      return;
-    }
-
-    this.spawnPoints.push({ x, y });
     this.updateSpawnCountUI();
     this.checkSpawnWarnings();
   }
@@ -323,11 +448,247 @@ export class MapEditor {
   }
 
   clearMap() {
+    const beforeTerrain: HistoryEntry['terrainChanges'] = [];
+    for (let y = 0; y < GRID_SIZE; y++) {
+      for (let x = 0; x < GRID_SIZE; x++) {
+        beforeTerrain.push({ x, y, before: this.terrain[y][x], after: 'normal' });
+      }
+    }
+    const beforeSpawn = this.spawnPoints.map((p) => ({ ...p }));
+
     this.terrain = this.createEmptyTerrain();
     this.spawnPoints = [];
+
+    this.pushHistory({
+      terrainChanges: beforeTerrain,
+      spawnChanges: { before: beforeSpawn, after: [] },
+    });
+
     this.updateSpawnCountUI();
     this.checkSpawnWarnings();
     this.render();
+  }
+
+  loadPreset(preset: MapPresetType) {
+    if (!confirm(`确定要加载预设"${this.getPresetName(preset)}"吗？当前编辑内容将被覆盖。`)) {
+      return;
+    }
+
+    const beforeTerrain: HistoryEntry['terrainChanges'] = [];
+    for (let y = 0; y < GRID_SIZE; y++) {
+      for (let x = 0; x < GRID_SIZE; x++) {
+        beforeTerrain.push({ x, y, before: this.terrain[y][x], after: 'normal' });
+      }
+    }
+    const beforeSpawn = this.spawnPoints.map((p) => ({ ...p }));
+
+    this.terrain = this.createEmptyTerrain();
+    this.spawnPoints = [];
+
+    switch (preset) {
+      case 'arena':
+        this.generateArena();
+        break;
+      case 'maze':
+        this.generateMaze();
+        break;
+      case 'toxic_swamp':
+        this.generateToxicSwamp();
+        break;
+    }
+
+    const afterTerrain: HistoryEntry['terrainChanges'] = [];
+    for (let y = 0; y < GRID_SIZE; y++) {
+      for (let x = 0; x < GRID_SIZE; x++) {
+        afterTerrain.push({ x, y, before: 'normal', after: this.terrain[y][x] });
+      }
+    }
+    const afterSpawn = this.spawnPoints.map((p) => ({ ...p }));
+
+    const combinedChanges: HistoryEntry['terrainChanges'] = [];
+    for (let i = 0; i < beforeTerrain.length; i++) {
+      const b = beforeTerrain[i];
+      const a = afterTerrain[i];
+      if (b.before !== a.after) {
+        combinedChanges.push({ x: b.x, y: b.y, before: b.before, after: a.after });
+      }
+    }
+
+    this.pushHistory({
+      terrainChanges: combinedChanges,
+      spawnChanges: { before: beforeSpawn, after: afterSpawn },
+    });
+
+    this.updateSpawnCountUI();
+    this.checkSpawnWarnings();
+    this.render();
+  }
+
+  private getPresetName(preset: MapPresetType): string {
+    switch (preset) {
+      case 'arena': return '竞技场';
+      case 'maze': return '迷宫';
+      case 'toxic_swamp': return '毒沼';
+    }
+  }
+
+  private generateArena() {
+    const center = (GRID_SIZE - 1) / 2;
+    const diamondRadius = 12;
+
+    for (let y = 0; y < GRID_SIZE; y++) {
+      for (let x = 0; x < GRID_SIZE; x++) {
+        const dist = Math.abs(x - center) + Math.abs(y - center);
+        if (dist > diamondRadius) {
+          this.terrain[y][x] = 'barrier';
+        }
+      }
+    }
+
+    const corners = [
+      { x: center - diamondRadius + 2, y: center - diamondRadius + 2 },
+      { x: center + diamondRadius - 2, y: center - diamondRadius + 2 },
+      { x: center - diamondRadius + 2, y: center + diamondRadius - 2 },
+      { x: center + diamondRadius - 2, y: center + diamondRadius - 2 },
+    ];
+    for (const c of corners) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = c.x + dx;
+          const ny = c.y + dy;
+          if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+            this.terrain[ny][nx] = 'normal';
+          }
+        }
+      }
+      this.spawnPoints.push({ x: c.x, y: c.y });
+    }
+
+    const highNutrientRadius = 4;
+    for (let y = 0; y < GRID_SIZE; y++) {
+      for (let x = 0; x < GRID_SIZE; x++) {
+        const dist = Math.sqrt(Math.pow(x - center, 2) + Math.pow(y - center, 2));
+        if (dist <= highNutrientRadius) {
+          this.terrain[y][x] = 'high_nutrient';
+        }
+      }
+    }
+  }
+
+  private generateMaze() {
+    const maze: boolean[][] = [];
+    for (let y = 0; y < GRID_SIZE; y++) {
+      maze.push(new Array(GRID_SIZE).fill(true));
+    }
+
+    const carve = (x: number, y: number) => {
+      maze[y][x] = false;
+      const dirs = [
+        [0, -2], [0, 2], [-2, 0], [2, 0]
+      ].sort(() => Math.random() - 0.5);
+
+      for (const [dx, dy] of dirs) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx > 0 && nx < GRID_SIZE - 1 && ny > 0 && ny < GRID_SIZE - 1 && maze[ny][nx]) {
+          maze[y + dy / 2][x + dx / 2] = false;
+          carve(nx, ny);
+        }
+      }
+    };
+
+    carve(1, 1);
+
+    for (let y = 0; y < GRID_SIZE; y++) {
+      for (let x = 0; x < GRID_SIZE; x++) {
+        if (maze[y][x]) {
+          this.terrain[y][x] = 'barrier';
+        } else {
+          this.terrain[y][x] = Math.random() < 0.1 ? 'high_nutrient' : 'normal';
+        }
+      }
+    }
+
+    const openCells: Position[] = [];
+    for (let y = 2; y < GRID_SIZE - 2; y++) {
+      for (let x = 2; x < GRID_SIZE - 2; x++) {
+        if (this.terrain[y][x] !== 'barrier') {
+          openCells.push({ x, y });
+        }
+      }
+    }
+
+    const shuffled = openCells.sort(() => Math.random() - 0.5);
+    const spawnPositions: Position[] = [];
+    for (const cell of shuffled) {
+      if (spawnPositions.length >= 6) break;
+      const farEnough = spawnPositions.every(
+        (sp) => Math.abs(sp.x - cell.x) + Math.abs(sp.y - cell.y) >= 12
+      );
+      if (farEnough) {
+        spawnPositions.push(cell);
+      }
+    }
+
+    for (const sp of spawnPositions) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = sp.x + dx;
+          const ny = sp.y + dy;
+          if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+            this.terrain[ny][nx] = 'normal';
+          }
+        }
+      }
+      this.spawnPoints.push(sp);
+    }
+  }
+
+  private generateToxicSwamp() {
+    for (let y = 0; y < GRID_SIZE; y++) {
+      for (let x = 0; x < GRID_SIZE; x++) {
+        const noise = this.simplexNoise(x * 0.15, y * 0.15);
+        if (noise < 0.3) {
+          this.terrain[y][x] = 'toxin';
+        } else if (noise < 0.5) {
+          this.terrain[y][x] = 'barren';
+        } else {
+          this.terrain[y][x] = 'normal';
+        }
+      }
+    }
+
+    const islandCenters: Position[] = [
+      { x: 5, y: 5 },
+      { x: GRID_SIZE - 6, y: 5 },
+      { x: 5, y: GRID_SIZE - 6 },
+      { x: GRID_SIZE - 6, y: GRID_SIZE - 6 },
+      { x: Math.floor(GRID_SIZE / 2), y: 5 },
+      { x: Math.floor(GRID_SIZE / 2), y: GRID_SIZE - 6 },
+    ];
+
+    for (let i = 0; i < islandCenters.length; i++) {
+      const center = islandCenters[i];
+      const radius = 3 + Math.floor(Math.random() * 2);
+      for (let y = 0; y < GRID_SIZE; y++) {
+        for (let x = 0; x < GRID_SIZE; x++) {
+          const dist = Math.sqrt(Math.pow(x - center.x, 2) + Math.pow(y - center.y, 2));
+          if (dist <= radius) {
+            this.terrain[y][x] = dist <= radius * 0.5 ? 'high_nutrient' : 'normal';
+          }
+        }
+      }
+    }
+
+    for (const sp of islandCenters) {
+      this.spawnPoints.push({ x: sp.x, y: sp.y });
+    }
+  }
+
+  private simplexNoise(x: number, y: number): number {
+    const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+    const n2 = Math.sin((x + 100) * 45.164 + (y + 200) * 92.133) * 12345.6789;
+    return ((n - Math.floor(n)) + (n2 - Math.floor(n2))) / 2;
   }
 
   async validateMap(name: string): Promise<MapValidationResult | null> {
@@ -381,6 +742,9 @@ export class MapEditor {
   loadMap(map: CustomMapData) {
     this.terrain = map.terrain.map((row) => [...row]);
     this.spawnPoints = map.spawnPoints.map((p) => ({ ...p }));
+    this.historyStack = [];
+    this.redoStack = [];
+    this.updateUndoRedoUI();
     this.updateSpawnCountUI();
     this.checkSpawnWarnings();
     this.render();
@@ -448,13 +812,32 @@ export class MapEditor {
   }
 }
 
+function getClientId(): string {
+  let cid = localStorage.getItem('mw_client_id');
+  if (!cid) {
+    cid = 'cid_' + Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+    localStorage.setItem('mw_client_id', cid);
+  }
+  return cid;
+}
+
+export function getOrCreateClientId(): string {
+  return getClientId();
+}
+
 export async function fetchMapList(
   network: GameWebSocket
 ): Promise<MapListItem[]> {
   return new Promise((resolve) => {
     const handler = (payload: any) => {
       network.off('map_list', handler as any);
-      resolve(payload?.maps || []);
+      const maps: MapListItem[] = payload?.maps || [];
+      const clientId = getClientId();
+      const mapsWithLiked = maps.map((m) => ({
+        ...m,
+        isLiked: m.likedBy?.includes(clientId) || false,
+      }));
+      resolve(mapsWithLiked);
     };
     network.once('map_list', handler as any);
     network.send({ type: 'list_maps', payload: {} });
@@ -464,4 +847,43 @@ export async function fetchMapList(
       resolve([]);
     }, 5000);
   });
+}
+
+export function thumbnailToDataUrl(thumbnail: string): string {
+  const size = 64;
+  const bytes = new Uint8Array(
+    atob(thumbnail)
+      .split('')
+      .map((c) => c.charCodeAt(0))
+  );
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const imageData = ctx.createImageData(size, size);
+  for (let i = 0; i < bytes.length && i < imageData.data.length; i++) {
+    imageData.data[i] = bytes[i];
+  }
+  ctx.putImageData(imageData, 0, 0);
+  return canvas.toDataURL();
+}
+
+export function renderThumbnailToCanvas(
+  thumbnail: string,
+  targetCanvas: HTMLCanvasElement
+) {
+  const size = 64;
+  const bytes = new Uint8Array(
+    atob(thumbnail)
+      .split('')
+      .map((c) => c.charCodeAt(0))
+  );
+  const ctx = targetCanvas.getContext('2d')!;
+  targetCanvas.width = size;
+  targetCanvas.height = size;
+  const imageData = ctx.createImageData(size, size);
+  for (let i = 0; i < bytes.length && i < imageData.data.length; i++) {
+    imageData.data[i] = bytes[i];
+  }
+  ctx.putImageData(imageData, 0, 0);
 }

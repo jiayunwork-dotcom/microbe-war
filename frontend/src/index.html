@@ -40,6 +40,7 @@
                             </select>
                             <button id="btn-refresh-maps" class="btn btn-secondary btn-small" style="margin-top:4px;">刷新地图列表</button>
                         </div>
+                        <div id="lobby-map-list" class="lobby-map-list"></div>
                         <button id="btn-create-room" class="btn btn-primary">创建房间</button>
                         <button id="btn-open-map-editor" class="btn btn-secondary" style="margin-top:8px;">🗺️ 地图工坊</button>
                     </div>
@@ -154,6 +155,23 @@
                                 出生点数量: <span id="spawn-count">0</span> / 6
                             </div>
                             <div id="spawn-warning" class="spawn-warning" style="display:none;"></div>
+                        </div>
+
+                        <div class="panel-section">
+                            <h3>撤销/重做</h3>
+                            <div class="undo-redo-buttons">
+                                <button id="btn-undo" class="btn btn-secondary btn-full" disabled>↩️ 撤销 (Ctrl+Z)</button>
+                                <button id="btn-redo" class="btn btn-secondary btn-full" style="margin-top:6px;" disabled>↪️ 重做 (Ctrl+Shift+Z)</button>
+                            </div>
+                        </div>
+
+                        <div class="panel-section">
+                            <h3>预设模板</h3>
+                            <div class="preset-buttons">
+                                <button class="btn btn-preset" data-preset="arena">⚔️ 竞技场</button>
+                                <button class="btn btn-preset" data-preset="maze" style="margin-top:6px;">🌿 迷宫</button>
+                                <button class="btn btn-preset" data-preset="toxic_swamp" style="margin-top:6px;">☠️ 毒沼</button>
+                            </div>
                         </div>
 
                         <div class="panel-section">

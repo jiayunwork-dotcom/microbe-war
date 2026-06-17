@@ -26,10 +26,11 @@ import {
   MapListItem,
   MapValidationResult,
   CustomMapData,
+  MapPresetType,
 } from './types.js';
 import { GameWebSocket } from './network.js';
 import { DishRenderer, RenderAnimation } from './renderer.js';
-import { MapEditor, fetchMapList } from './mapEditor.js';
+import { MapEditor, fetchMapList, thumbnailToDataUrl, renderThumbnailToCanvas, getOrCreateClientId } from './mapEditor.js';
 
 const MICROBE_NAMES: Record<MicrobeType, string> = {
   bacteria: '🦠 细菌',
@@ -255,6 +256,10 @@ class GameController {
       if (payload?.roomInfo && this.gameState) {
         this.updateWaitingRoomWithMap(payload.roomInfo);
       }
+    });
+
+    this.network.on('map_liked', (payload) => {
+      console.log('Map liked:', payload);
     });
   }
 
@@ -572,6 +577,28 @@ class GameController {
         const mode = target.dataset.mode as EditMode;
         if (mode && this.mapEditor) {
           this.mapEditor.setEditMode(mode);
+        }
+      });
+    });
+
+    document.getElementById('btn-undo')?.addEventListener('click', () => {
+      if (this.mapEditor) {
+        this.mapEditor.undo();
+      }
+    });
+
+    document.getElementById('btn-redo')?.addEventListener('click', () => {
+      if (this.mapEditor) {
+        this.mapEditor.redo();
+      }
+    });
+
+    document.querySelectorAll('.btn-preset').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const target = e.currentTarget as HTMLElement;
+        const preset = target.dataset.preset as MapPresetType;
+        if (preset && this.mapEditor) {
+          this.mapEditor.loadPreset(preset);
         }
       });
     });
@@ -2511,18 +2538,87 @@ class GameController {
     const selectEl = document.getElementById(
       'map-select-create'
     ) as HTMLSelectElement;
-    if (!selectEl) return;
+    const lobbyMapListEl = document.getElementById('lobby-map-list');
+    if (!selectEl && !lobbyMapListEl) return;
+
     const maps = await fetchMapList(this.network);
     this.cachedMaps = maps;
-    const current = selectEl.value;
-    selectEl.innerHTML = '<option value="">🎲 随机地图</option>';
-    for (const m of maps) {
-      const opt = document.createElement('option');
-      opt.value = m.mapId;
-      opt.textContent = `${m.name} (${m.spawnCount}出生点)`;
-      selectEl.appendChild(opt);
+
+    if (selectEl) {
+      const current = selectEl.value;
+      selectEl.innerHTML = '<option value="">🎲 随机地图</option>';
+      for (const m of maps) {
+        const opt = document.createElement('option');
+        opt.value = m.mapId;
+        opt.textContent = `${m.name} (${m.spawnCount}出生点, 👍${m.likeCount || 0})`;
+        selectEl.appendChild(opt);
+      }
+      selectEl.value = current;
     }
-    selectEl.value = current;
+
+    this.renderLobbyMapListWithThumbs(maps);
+  }
+
+  private renderLobbyMapListWithThumbs(maps: MapListItem[]) {
+    const container = document.getElementById('lobby-map-list');
+    if (!container) return;
+
+    if (maps.length === 0) {
+      container.innerHTML = '<div style="color:var(--text-secondary);padding:8px;">暂无自定义地图</div>';
+      return;
+    }
+
+    container.innerHTML = maps
+      .map((m) => {
+        const date = new Date(m.createdAt).toLocaleDateString('zh-CN');
+        const thumbData = m.thumbnail ? thumbnailToDataUrl(m.thumbnail) : '';
+        return `
+          <div class="lobby-map-item" data-map-id="${m.mapId}">
+            <canvas class="map-thumbnail" width="64" height="64" data-thumb="${m.thumbnail || ''}"></canvas>
+            <div class="map-item-content">
+              <div class="map-item-title">${this.escapeHtml(m.name)}</div>
+              <div class="map-item-info">${m.spawnCount}出生点 · ${date}</div>
+              <div class="map-item-likes">
+                <button class="btn-like" data-map-id="${m.mapId}" title="点赞">
+                  ${m.isLiked ? '❤️' : '🤍'}
+                </button>
+                <span class="like-count">${m.likeCount || 0}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    container.querySelectorAll('canvas.map-thumbnail').forEach((canvas) => {
+      const c = canvas as HTMLCanvasElement;
+      const thumbData = c.dataset.thumb;
+      if (thumbData) {
+        renderThumbnailToCanvas(thumbData, c);
+      }
+    });
+
+    container.querySelectorAll('.btn-like').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const mapId = (btn as HTMLElement).dataset.mapId;
+        if (mapId) {
+          this.likeMap(mapId);
+        }
+      });
+    });
+
+    container.querySelectorAll('.lobby-map-item').forEach((el) => {
+      el.addEventListener('click', () => {
+        const mapId = (el as HTMLElement).dataset.mapId;
+        const selectEl = document.getElementById('map-select-create') as HTMLSelectElement;
+        if (selectEl && mapId) {
+          selectEl.value = mapId;
+          container.querySelectorAll('.lobby-map-item').forEach(i => i.classList.remove('selected'));
+          (el as HTMLElement).classList.add('selected');
+        }
+      });
+    });
   }
 
   private async refreshSavedMapList() {
@@ -2540,23 +2636,65 @@ class GameController {
     listEl.innerHTML = maps
       .map((m) => {
         const date = new Date(m.createdAt).toLocaleDateString('zh-CN');
+        const thumbData = m.thumbnail ? thumbnailToDataUrl(m.thumbnail) : '';
         return `
           <div class="saved-map-item" data-map-id="${m.mapId}">
-            <div class="saved-map-item-title">${this.escapeHtml(m.name)}</div>
-            <div class="saved-map-item-info">${m.spawnCount}出生点 · ${date}</div>
+            <canvas class="map-thumbnail" width="64" height="64" data-thumb="${m.thumbnail || ''}"></canvas>
+            <div class="saved-map-item-main">
+              <div class="saved-map-item-title">${this.escapeHtml(m.name)}</div>
+              <div class="saved-map-item-info">${m.spawnCount}出生点 · ${date}</div>
+              <div class="map-item-likes">
+                <button class="btn-like" data-map-id="${m.mapId}" title="点赞">
+                  ${m.isLiked ? '❤️' : '🤍'}
+                </button>
+                <span class="like-count">${m.likeCount || 0}</span>
+              </div>
+            </div>
           </div>
         `;
       })
       .join('');
 
+    listEl.querySelectorAll('canvas.map-thumbnail').forEach((canvas) => {
+      const c = canvas as HTMLCanvasElement;
+      const thumbData = c.dataset.thumb;
+      if (thumbData) {
+        renderThumbnailToCanvas(thumbData, c);
+      }
+    });
+
     listEl.querySelectorAll('.saved-map-item').forEach((el) => {
       el.addEventListener('click', async () => {
         const mapId = (el as HTMLElement).dataset.mapId;
-        if (mapId) {
+        if (mapId && !(el as HTMLElement).classList.contains('like-clicked')) {
           await this.loadMapIntoEditor(mapId);
+        }
+        (el as HTMLElement).classList.remove('like-clicked');
+      });
+    });
+
+    listEl.querySelectorAll('.btn-like').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const mapId = (btn as HTMLElement).dataset.mapId;
+        const parent = (btn as HTMLElement).closest('.saved-map-item');
+        if (parent) {
+          (parent as HTMLElement).classList.add('like-clicked');
+        }
+        if (mapId) {
+          this.likeMap(mapId);
         }
       });
     });
+  }
+
+  private async likeMap(mapId: string) {
+    const clientId = getOrCreateClientId();
+    this.network.send({ type: 'like_map', payload: { mapId, clientId } });
+    setTimeout(() => {
+      this.refreshLobbyMapList();
+      this.refreshSavedMapList();
+    }, 100);
   }
 
   private async loadMapIntoEditor(mapId: string) {

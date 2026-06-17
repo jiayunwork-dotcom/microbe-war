@@ -14,6 +14,9 @@ export interface CustomMapData {
   gridSize: number;
   terrain: TerrainType[][];
   spawnPoints: Position[];
+  thumbnail?: string;
+  likeCount?: number;
+  likedBy?: string[];
 }
 
 export interface MapValidationResult {
@@ -222,7 +225,8 @@ export type ClientMessageType =
   | 'validate_map'
   | 'save_map'
   | 'get_map'
-  | 'set_room_map';
+  | 'set_room_map'
+  | 'like_map';
 
 export type ServerMessageType =
   | 'room_created'
@@ -254,7 +258,8 @@ export type ServerMessageType =
   | 'map_list'
   | 'map_data'
   | 'map_validation'
-  | 'room_updated';
+  | 'room_updated'
+  | 'map_liked';
 
 export interface ClientMessage {
   type: ClientMessageType;
