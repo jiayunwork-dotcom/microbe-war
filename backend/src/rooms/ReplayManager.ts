@@ -15,6 +15,8 @@ import {
   AllianceEvent,
   TurnSnapshot,
   Player,
+  Highlight,
+  HighlightType,
 } from '../game/types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -325,6 +327,8 @@ export class ReplayManager {
 
     const winner = finalGameState.players.find(p => p.id === finalGameState.winnerId);
 
+    const highlights = this.analyzeHighlights(pending, finalGameState);
+
     const replayData: ReplayData = {
       replayId: pending.replayId,
       roomId: pending.roomId,
@@ -349,6 +353,7 @@ export class ReplayManager {
       finalRankings: JSON.parse(JSON.stringify(finalGameState.rankings)),
       winnerId: finalGameState.winnerId,
       stats,
+      highlights,
     };
 
     this.replays.set(pending.replayId, replayData);
@@ -392,5 +397,98 @@ export class ReplayManager {
       }
     }
     return null;
+  }
+
+  private analyzeHighlights(pending: PendingReplay, finalGameState: GameState): Highlight[] {
+    const highlights: Highlight[] = [];
+    const playerNameMap = new Map<string, string>();
+    for (const p of finalGameState.players) {
+      playerNameMap.set(p.id, p.name);
+    }
+
+    for (const [turn, killCount] of pending.turnKillCounts) {
+      if (killCount >= 3) {
+        const events = pending.turnEvents[turn] || [];
+        const playerKills = new Map<string, number>();
+        for (const ev of events) {
+          if ((ev.type === 'attack' && ev.message.includes('击败')) || ev.type === 'elimination') {
+            if (ev.playerId) {
+              playerKills.set(ev.playerId, (playerKills.get(ev.playerId) || 0) + 1);
+            }
+          }
+        }
+        let topKiller = '';
+        let topKills = 0;
+        for (const [pid, k] of playerKills) {
+          if (k > topKills) {
+            topKills = k;
+            topKiller = pid;
+          }
+        }
+        const killerName = playerNameMap.get(topKiller) || '未知玩家';
+        highlights.push({
+          turn,
+          type: 'multi_kill',
+          description: `第${turn}回合爆发激烈战斗，共${killCount}次击杀${topKiller ? `，${killerName}贡献${topKills}次` : ''}`,
+          details: {
+            killCount,
+            playerId: topKiller || undefined,
+            playerName: topKiller ? killerName : undefined,
+          },
+        });
+      }
+    }
+
+    if (pending.areaHistory.length >= 2) {
+      for (let i = 1; i < pending.areaHistory.length; i++) {
+        const curr = pending.areaHistory[i];
+        const prev = pending.areaHistory[i - 1];
+        for (const [playerId, area] of Object.entries(curr.areas)) {
+          const prevArea = prev.areas[playerId] || 0;
+          const growth = area - prevArea;
+          if (growth >= 5) {
+            const playerName = playerNameMap.get(playerId) || '未知玩家';
+            const exists = highlights.some(
+              (h) => h.turn === curr.turn && h.type === 'territory_surge' && h.details?.playerId === playerId
+            );
+            if (!exists) {
+              highlights.push({
+                turn: curr.turn,
+                type: 'territory_surge',
+                description: `第${curr.turn}回合 ${playerName} 领地扩张+${growth}格`,
+                details: {
+                  playerId,
+                  playerName,
+                  territoryGrowth: growth,
+                },
+              });
+            }
+          }
+        }
+      }
+    }
+
+    for (const alliance of pending.allianceEvents) {
+      if (alliance.type === 'broken' && alliance.betrayerId) {
+        const betrayerName = playerNameMap.get(alliance.betrayerId) || '未知玩家';
+        const victimId =
+          alliance.betrayerId === alliance.playerId1 ? alliance.playerId2 : alliance.playerId1;
+        const victimName = playerNameMap.get(victimId) || '未知玩家';
+        highlights.push({
+          turn: alliance.turn,
+          type: 'betrayal',
+          description: `第${alliance.turn}回合 ${betrayerName} 背叛了同盟，攻击了 ${victimName}`,
+          details: {
+            betrayerId: alliance.betrayerId,
+            betrayerName,
+            victimId,
+            victimName,
+          },
+        });
+      }
+    }
+
+    highlights.sort((a, b) => a.turn - b.turn);
+    return highlights;
   }
 }

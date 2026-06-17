@@ -65,6 +65,15 @@
                         </div>
                         <button id="btn-join-room" class="btn btn-primary">加入房间</button>
                     </div>
+
+                    <div class="lobby-section">
+                        <h2>回放ID查询</h2>
+                        <div class="form-group">
+                            <label>输入回放ID</label>
+                            <input type="text" id="replay-id-query" placeholder="例如：replay_xxxxxxxx">
+                        </div>
+                        <button id="btn-query-replay" class="btn btn-secondary">查询回放</button>
+                    </div>
                 </div>
 
                 <div id="lobby-message" class="lobby-message"></div>
@@ -228,13 +237,36 @@
                     <div class="replay-info">
                         <span id="replay-room-name"></span>
                         <span id="replay-turn-info">回合: 0 / 0</span>
+                        <span id="replay-id-display" class="replay-id-label"></span>
                     </div>
-                    <button id="btn-exit-replay" class="btn btn-danger btn-small">退出回放</button>
+                    <div class="replay-header-actions">
+                        <button id="btn-compare-toggle" class="btn btn-secondary btn-small">对比模式</button>
+                        <button id="btn-share-replay" class="btn btn-secondary btn-small">分享回放</button>
+                        <button id="btn-export-replay" class="btn btn-secondary btn-small">导出数据</button>
+                        <button id="btn-exit-replay" class="btn btn-danger btn-small">退出回放</button>
+                    </div>
                 </div>
 
-                <div class="replay-main">
-                    <div class="dish-container">
+                <div id="replay-compare-bar" class="replay-compare-bar" style="display:none;">
+                    <div class="compare-left-info">
+                        <span class="compare-label">左</span>
+                        <span id="compare-left-name" class="compare-room-name">请选择回放</span>
+                    </div>
+                    <div class="compare-input-section">
+                        <input type="text" id="compare-replay-id-input" class="compare-input" placeholder="输入回放ID添加对比">
+                        <button id="btn-load-compare" class="btn btn-primary btn-small">加载对比</button>
+                        <button id="btn-exit-compare" class="btn btn-secondary btn-small">退出对比</button>
+                    </div>
+                    <div class="compare-right-info">
+                        <span id="compare-right-name" class="compare-room-name">请选择回放</span>
+                        <span class="compare-label">右</span>
+                    </div>
+                </div>
+
+                <div class="replay-main" id="replay-main-normal">
+                    <div class="dish-container replay-dish-wrapper">
                         <canvas id="replay-canvas" width="600" height="600"></canvas>
+                        <div id="replay-highlights-overlay" class="highlights-overlay"></div>
                     </div>
 
                     <div class="side-panel">
@@ -242,6 +274,13 @@
                             <h3>当前回合事件</h3>
                             <div id="replay-event-panel" class="replay-event-panel">
                                 <div class="replay-event-empty">拖动进度条或点击播放开始回放</div>
+                            </div>
+                        </div>
+
+                        <div class="panel-section">
+                            <h3>✨ 精彩集锦</h3>
+                            <div id="replay-highlights-panel" class="replay-highlights-panel">
+                                <div class="replay-event-empty">暂无精彩片段</div>
                             </div>
                         </div>
 
@@ -257,7 +296,28 @@
                     </div>
                 </div>
 
-                <div class="replay-controls">
+                <div class="replay-main replay-compare-main" id="replay-main-compare" style="display:none;">
+                    <div class="dish-container replay-dish-compare">
+                        <div class="compare-canvas-title">回放 A</div>
+                        <canvas id="replay-canvas-left" width="500" height="500"></canvas>
+                    </div>
+
+                    <div class="replay-diff-panel">
+                        <div class="panel-section">
+                            <h3>📊 回合差异对比</h3>
+                            <div id="replay-diff-summary" class="replay-diff-summary">
+                                <div class="replay-event-empty">暂无数据</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dish-container replay-dish-compare">
+                        <div class="compare-canvas-title">回放 B</div>
+                        <canvas id="replay-canvas-right" width="500" height="500"></canvas>
+                    </div>
+                </div>
+
+                <div class="replay-controls" id="replay-controls-normal">
                     <button id="btn-replay-play" class="btn btn-primary">
                         <span id="replay-play-icon">▶</span>
                         <span id="replay-play-text">播放</span>
@@ -270,6 +330,28 @@
                     <div class="replay-progress-container">
                         <input type="range" id="replay-progress" min="0" max="0" value="0" class="replay-progress">
                         <span id="replay-progress-label">0</span>
+                    </div>
+                </div>
+
+                <div class="replay-controls" id="replay-controls-compare" style="display:none;">
+                    <button id="btn-replay-play-compare" class="btn btn-primary">
+                        <span id="replay-play-icon-compare">▶</span>
+                        <span id="replay-play-text-compare">播放</span>
+                    </button>
+                    <div class="replay-speed-controls">
+                        <button class="btn btn-small btn-speed-compare active" data-speed="1">1x</button>
+                        <button class="btn btn-small btn-speed-compare" data-speed="2">2x</button>
+                        <button class="btn btn-small btn-speed-compare" data-speed="4">4x</button>
+                    </div>
+                    <div class="replay-progress-container">
+                        <span class="compare-progress-label">A:</span>
+                        <input type="range" id="replay-progress-left" min="0" max="0" value="0" class="replay-progress">
+                        <span id="replay-progress-label-left">0</span>
+                    </div>
+                    <div class="replay-progress-container">
+                        <span class="compare-progress-label">B:</span>
+                        <input type="range" id="replay-progress-right" min="0" max="0" value="0" class="replay-progress">
+                        <span id="replay-progress-label-right">0</span>
                     </div>
                 </div>
             </div>

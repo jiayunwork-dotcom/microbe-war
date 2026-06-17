@@ -294,6 +294,24 @@ export interface PlayerStats {
   finalWeightedArea: number;
 }
 
+export type HighlightType = 'multi_kill' | 'territory_surge' | 'betrayal';
+
+export interface Highlight {
+  turn: number;
+  type: HighlightType;
+  description: string;
+  details?: {
+    killCount?: number;
+    playerId?: string;
+    playerName?: string;
+    territoryGrowth?: number;
+    betrayerId?: string;
+    betrayerName?: string;
+    victimId?: string;
+    victimName?: string;
+  };
+}
+
 export interface GameStats {
   totalTurns: number;
   mostViolentTurn: {
@@ -340,6 +358,7 @@ export interface ReplayData {
   }>;
   winnerId: string | null;
   stats: GameStats;
+  highlights: Highlight[];
 }
 
 export interface ReplayListItem {

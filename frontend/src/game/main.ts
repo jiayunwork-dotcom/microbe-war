@@ -18,6 +18,7 @@ import {
   GameStats,
   TurnAction,
   AllianceEvent,
+  Highlight,
 } from './types.js';
 import { GameWebSocket } from './network.js';
 import { DishRenderer, RenderAnimation } from './renderer.js';
@@ -33,6 +34,8 @@ class GameController {
   private network: GameWebSocket;
   private renderer: DishRenderer | null = null;
   private replayRenderer: DishRenderer | null = null;
+  private replayRendererLeft: DishRenderer | null = null;
+  private replayRendererRight: DishRenderer | null = null;
 
   private roomId: string = '';
   private myPlayerId: string = '';
@@ -52,6 +55,15 @@ class GameController {
   private playbackTimer: number | null = null;
   private latestStats: GameStats | null = null;
 
+  private compareMode: boolean = false;
+  private compareReplayLeft: ReplayData | null = null;
+  private compareReplayRight: ReplayData | null = null;
+  private compareTurn: number = 0;
+  private compareIsPlaying: boolean = false;
+  private comparePlaybackSpeed: number = 1;
+  private comparePlaybackTimer: number | null = null;
+  private pendingCompareReplayId: string = '';
+
   constructor() {
     this.network = new GameWebSocket();
   }
@@ -67,6 +79,21 @@ class GameController {
     this.setupNetworkHandlers();
     this.setupUIHandlers();
     this.requestRoomList();
+    this.checkUrlReplayParam();
+  }
+
+  private checkUrlReplayParam() {
+    const params = new URLSearchParams(window.location.search);
+    const replayId = params.get('replay');
+    if (replayId) {
+      setTimeout(() => {
+        this.requestReplayById(replayId);
+      }, 500);
+    }
+    const compareReplayId = params.get('compare');
+    if (compareReplayId) {
+      this.pendingCompareReplayId = compareReplayId;
+    }
   }
 
   private setupNetworkHandlers() {
@@ -378,6 +405,92 @@ class GameController {
         const target = e.target as HTMLInputElement;
         const turn = parseInt(target.value, 10);
         this.seekToTurn(turn);
+      });
+    }
+
+    document.getElementById('btn-query-replay')?.addEventListener('click', () => {
+      const input = document.getElementById('replay-id-query') as HTMLInputElement;
+      if (!input) return;
+      const replayId = input.value.trim();
+      if (!replayId) {
+        this.showLobbyMessage('请输入回放ID', true);
+        return;
+      }
+      this.requestReplayById(replayId);
+    });
+
+    const replayQueryInput = document.getElementById('replay-id-query') as HTMLInputElement;
+    if (replayQueryInput) {
+      replayQueryInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          document.getElementById('btn-query-replay')?.click();
+        }
+      });
+    }
+
+    document.getElementById('btn-share-replay')?.addEventListener('click', () => {
+      this.shareReplay();
+    });
+
+    document.getElementById('btn-export-replay')?.addEventListener('click', () => {
+      this.exportReplayData();
+    });
+
+    document.getElementById('btn-compare-toggle')?.addEventListener('click', () => {
+      this.toggleCompareMode();
+    });
+
+    document.getElementById('btn-exit-compare')?.addEventListener('click', () => {
+      this.exitCompareMode();
+    });
+
+    document.getElementById('btn-load-compare')?.addEventListener('click', () => {
+      const input = document.getElementById('compare-replay-id-input') as HTMLInputElement;
+      if (!input) return;
+      const replayId = input.value.trim();
+      if (!replayId) {
+        this.showLobbyMessage('请输入回放ID', true);
+        return;
+      }
+      this.loadCompareReplay(replayId);
+    });
+
+    const compareInput = document.getElementById('compare-replay-id-input') as HTMLInputElement;
+    if (compareInput) {
+      compareInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          document.getElementById('btn-load-compare')?.click();
+        }
+      });
+    }
+
+    document.getElementById('btn-replay-play-compare')?.addEventListener('click', () => {
+      this.toggleComparePlay();
+    });
+
+    document.querySelectorAll('.btn-speed-compare').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const target = e.currentTarget as HTMLElement;
+        const speed = parseInt(target.dataset.speed || '1', 10);
+        this.setComparePlaybackSpeed(speed);
+      });
+    });
+
+    const replayProgressLeft = document.getElementById('replay-progress-left') as HTMLInputElement;
+    if (replayProgressLeft) {
+      replayProgressLeft.addEventListener('input', (e) => {
+        const target = e.target as HTMLInputElement;
+        const turn = parseInt(target.value, 10);
+        this.seekCompareTurn(turn, 'left');
+      });
+    }
+
+    const replayProgressRight = document.getElementById('replay-progress-right') as HTMLInputElement;
+    if (replayProgressRight) {
+      replayProgressRight.addEventListener('input', (e) => {
+        const target = e.target as HTMLInputElement;
+        const turn = parseInt(target.value, 10);
+        this.seekCompareTurn(turn, 'right');
       });
     }
   }
@@ -1314,6 +1427,112 @@ class GameController {
     });
   }
 
+  private requestReplayById(replayId: string) {
+    this.network.send({
+      type: 'request_replay',
+      payload: { replayId },
+    });
+  }
+
+  private shareReplay() {
+    if (!this.currentReplay) return;
+    const url = `${window.location.origin}${window.location.pathname}?replay=${this.currentReplay.replayId}`;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url).then(
+        () => {
+          this.showToast(`回放链接已复制: ${this.currentReplay!.replayId}`);
+        },
+        () => {
+          this.copyFallback(url);
+        }
+      );
+    } else {
+      this.copyFallback(url);
+    }
+  }
+
+  private copyFallback(text: string) {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      document.execCommand('copy');
+      this.showToast('回放链接已复制到剪贴板');
+    } catch {
+      this.showToast(`复制失败，请手动复制: ${text}`, true);
+    }
+    document.body.removeChild(textarea);
+  }
+
+  private showToast(message: string, isError: boolean = false) {
+    const toast = document.createElement('div');
+    toast.className = 'toast-notification ' + (isError ? 'error' : 'success');
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => {
+      toast.classList.add('show');
+    });
+    setTimeout(() => {
+      toast.classList.remove('show');
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
+  }
+
+  private exportReplayData() {
+    if (!this.currentReplay) return;
+    const r = this.currentReplay;
+    const startDate = new Date(r.startTime);
+    const dateStr = `${startDate.getFullYear()}${(startDate.getMonth() + 1)
+      .toString()
+      .padStart(2, '0')}${startDate.getDate().toString().padStart(2, '0')}${startDate
+      .getHours()
+      .toString()
+      .padStart(2, '0')}${startDate.getMinutes().toString().padStart(2, '0')}`;
+    const safeRoomName = r.roomName.replace(/[\\/:*?"<>|]/g, '_');
+    const filename = `回放_${safeRoomName}_${dateStr}.json`;
+
+    const exportData = {
+      gameInfo: {
+        replayId: r.replayId,
+        roomId: r.roomId,
+        roomName: r.roomName,
+        gameId: r.gameId,
+        startTime: new Date(r.startTime).toLocaleString('zh-CN'),
+        endTime: new Date(r.endTime).toLocaleString('zh-CN'),
+        startTimeMs: r.startTime,
+        endTimeMs: r.endTime,
+        totalTurns: r.stats.totalTurns,
+        maxTurns: r.maxTurns,
+        gridSize: r.gridSize,
+        playerCount: r.players.filter((p) => !p.isSpectator).length,
+      },
+      mvp: r.stats.mvp,
+      playerStats: r.stats.playerStats,
+      areaHistory: r.stats.areaHistory,
+      finalRankings: r.finalRankings,
+      winnerId: r.winnerId,
+      winnerName:
+        r.players.find((p) => p.id === r.winnerId)?.name || null,
+      highlights: r.highlights || [],
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+      type: 'application/json',
+    });
+    const downloadUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(downloadUrl);
+    this.showToast('回放数据已导出');
+  }
+
   private startReplayPlayer() {
     if (!this.currentReplay) return;
 
@@ -1328,21 +1547,132 @@ class GameController {
     const roomNameEl = document.getElementById('replay-room-name');
     const turnInfoEl = document.getElementById('replay-turn-info');
     const progressEl = document.getElementById('replay-progress') as HTMLInputElement;
+    const replayIdEl = document.getElementById('replay-id-display');
 
     if (roomNameEl) roomNameEl.textContent = this.currentReplay.roomName;
     if (turnInfoEl) {
       turnInfoEl.textContent = `回合: 0 / ${this.currentReplay.stats.totalTurns}`;
+    }
+    if (replayIdEl) {
+      replayIdEl.textContent = `ID: ${this.currentReplay.replayId}`;
+      replayIdEl.title = '点击复制回放ID';
+      replayIdEl.style.cursor = 'pointer';
+      replayIdEl.onclick = () => {
+        if (this.currentReplay) {
+          navigator.clipboard?.writeText(this.currentReplay.replayId).then(() => {
+            this.showToast('回放ID已复制');
+          });
+        }
+      };
     }
     if (progressEl) {
       progressEl.max = String(this.currentReplay.stats.totalTurns);
       progressEl.value = '0';
     }
 
+    this.renderHighlightsPanel();
+    this.renderHighlightsOnProgress();
+
     this.replayTurn = 0;
     this.isPlaying = false;
     this.updatePlayButton();
     this.renderReplayTurn(0);
     this.updateReplayChat(0);
+
+    if (this.pendingCompareReplayId) {
+      setTimeout(() => {
+        this.toggleCompareMode();
+        (document.getElementById('compare-replay-id-input') as HTMLInputElement)!.value =
+          this.pendingCompareReplayId;
+        this.loadCompareReplay(this.pendingCompareReplayId);
+        this.pendingCompareReplayId = '';
+      }, 300);
+    }
+  }
+
+  private renderHighlightsPanel() {
+    const panel = document.getElementById('replay-highlights-panel');
+    if (!panel || !this.currentReplay) return;
+
+    const highlights = this.currentReplay.highlights || [];
+    if (highlights.length === 0) {
+      panel.innerHTML = '<div class="replay-event-empty">暂无精彩片段</div>';
+      return;
+    }
+
+    const iconMap: Record<string, string> = {
+      multi_kill: '⚔️',
+      territory_surge: '🌱',
+      betrayal: '💔',
+    };
+
+    panel.innerHTML = highlights
+      .map(
+        (h, idx) => `
+        <div class="highlight-item" data-index="${idx}" data-type="${h.type}" data-turn="${h.turn}">
+          <div class="highlight-icon">${iconMap[h.type] || '✨'}</div>
+          <div class="highlight-content">
+            <div class="highlight-title">
+              <span class="highlight-turn">第${h.turn}回合</span>
+              <span class="highlight-type highlight-type-${h.type}">${
+          h.type === 'multi_kill'
+            ? '多杀'
+            : h.type === 'territory_surge'
+            ? '领地暴涨'
+            : '联盟背叛'
+        }</span>
+            </div>
+            <div class="highlight-desc">${this.escapeHtml(h.description)}</div>
+          </div>
+        </div>
+      `
+      )
+      .join('');
+
+    panel.querySelectorAll('.highlight-item').forEach((item) => {
+      item.addEventListener('click', (e) => {
+        const turn = parseInt((item as HTMLElement).dataset.turn || '0', 10);
+        this.jumpToHighlight(turn);
+      });
+    });
+  }
+
+  private renderHighlightsOnProgress() {
+    if (!this.currentReplay) return;
+    const container = document.querySelector(
+      '.replay-controls .replay-progress-container'
+    ) as HTMLElement;
+    if (!container) return;
+
+    const existing = container.querySelectorAll('.highlight-marker-dot');
+    existing.forEach((el) => el.remove());
+
+    const highlights = this.currentReplay.highlights || [];
+    const totalTurns = this.currentReplay.stats.totalTurns;
+
+    const progressEl = document.getElementById('replay-progress') as HTMLInputElement;
+    if (!progressEl) return;
+
+    for (const h of highlights) {
+      const dot = document.createElement('div');
+      dot.className = 'highlight-marker-dot';
+      const pct = totalTurns > 0 ? (h.turn / totalTurns) * 100 : 0;
+      dot.style.left = `calc(${pct}% - 5px)`;
+      dot.title = `第${h.turn}回合: ${h.description}`;
+      dot.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.jumpToHighlight(h.turn);
+      });
+      container.appendChild(dot);
+    }
+  }
+
+  private jumpToHighlight(turn: number) {
+    this.stopPlayback();
+    this.isPlaying = true;
+    this.seekToTurn(turn);
+    this.updatePlayButton();
+    this.startPlayback();
   }
 
   private renderReplayTurn(turn: number) {
@@ -1594,6 +1924,381 @@ class GameController {
     if (this.replayRenderer) {
       this.replayRenderer.destroy();
       this.replayRenderer = null;
+    }
+    this.stopComparePlayback();
+    this.compareIsPlaying = false;
+    if (this.replayRendererLeft) {
+      this.replayRendererLeft.destroy();
+      this.replayRendererLeft = null;
+    }
+    if (this.replayRendererRight) {
+      this.replayRendererRight.destroy();
+      this.replayRendererRight = null;
+    }
+    this.compareReplayLeft = null;
+    this.compareReplayRight = null;
+    this.compareMode = false;
+  }
+
+  private toggleCompareMode() {
+    if (!this.currentReplay) return;
+    this.compareMode = !this.compareMode;
+    if (this.compareMode) {
+      this.enterCompareMode();
+    } else {
+      this.exitCompareMode();
+    }
+  }
+
+  private enterCompareMode() {
+    this.compareReplayLeft = this.currentReplay;
+    this.stopPlayback();
+    this.isPlaying = false;
+    this.updatePlayButton();
+
+    (document.getElementById('replay-main-normal') as HTMLElement)!.style.display =
+      'none';
+    (document.getElementById('replay-main-compare') as HTMLElement)!.style.display =
+      'flex';
+    (document.getElementById('replay-controls-normal') as HTMLElement)!.style.display =
+      'none';
+    (document.getElementById('replay-controls-compare') as HTMLElement)!.style.display =
+      'flex';
+    (document.getElementById('replay-compare-bar') as HTMLElement)!.style.display =
+      'flex';
+
+    if (!this.replayRendererLeft) {
+      const canvasLeft = document.getElementById('replay-canvas-left') as HTMLCanvasElement;
+      this.replayRendererLeft = new DishRenderer(canvasLeft);
+      this.replayRendererLeft.setMyPlayerId('');
+    }
+    if (!this.replayRendererRight) {
+      const canvasRight = document.getElementById('replay-canvas-right') as HTMLCanvasElement;
+      this.replayRendererRight = new DishRenderer(canvasRight);
+      this.replayRendererRight.setMyPlayerId('');
+    }
+
+    const leftNameEl = document.getElementById('compare-left-name') as HTMLElement;
+    leftNameEl.textContent = this.compareReplayLeft!.roomName;
+
+    const progressLeft = document.getElementById('replay-progress-left') as HTMLInputElement;
+    if (progressLeft) {
+      progressLeft.max = String(this.compareReplayLeft!.stats.totalTurns);
+      progressLeft.value = '0';
+    }
+
+    this.compareTurn = 0;
+    this.renderCompareTurn(this.compareTurn);
+    this.updateComparePlayButton();
+
+    if (!this.compareReplayRight) {
+      const rightNameEl = document.getElementById('compare-right-name') as HTMLElement;
+      rightNameEl.textContent = '请输入回放ID加载';
+    }
+  }
+
+  private exitCompareMode() {
+    this.stopComparePlayback();
+    this.compareIsPlaying = false;
+    this.updateComparePlayButton();
+
+    (document.getElementById('replay-main-normal') as HTMLElement)!.style.display =
+      'flex';
+    (document.getElementById('replay-main-compare') as HTMLElement)!.style.display =
+      'none';
+    (document.getElementById('replay-controls-normal') as HTMLElement)!.style.display =
+      'flex';
+    (document.getElementById('replay-controls-compare') as HTMLElement)!.style.display =
+      'none';
+    (document.getElementById('replay-compare-bar') as HTMLElement)!.style.display =
+      'none';
+
+    this.compareMode = false;
+    this.compareReplayRight = null;
+
+    if (this.replayRendererLeft) {
+      this.replayRendererLeft.destroy();
+      this.replayRendererLeft = null;
+    }
+    if (this.replayRendererRight) {
+      this.replayRendererRight.destroy();
+      this.replayRendererRight = null;
+    }
+  }
+
+  private loadCompareReplay(replayId: string) {
+    this.pendingCompareReplayId = '';
+    this.network.send({
+      type: 'request_replay',
+      payload: { replayId },
+    });
+
+    const originalHandler = (payload: ReplayData) => {
+      if (this.compareMode) {
+        this.compareReplayRight = payload;
+        const rightNameEl = document.getElementById('compare-right-name') as HTMLElement;
+        rightNameEl.textContent = this.compareReplayRight.roomName;
+
+        const progressRight = document.getElementById('replay-progress-right') as HTMLInputElement;
+        if (progressRight) {
+          progressRight.max = String(this.compareReplayRight.stats.totalTurns);
+          progressRight.value = '0';
+        }
+
+        this.renderCompareTurn(this.compareTurn);
+        this.showToast('对比回放加载成功');
+        this.network.off('replay_data', originalHandler);
+      }
+    };
+    this.network.on('replay_data', originalHandler);
+
+    setTimeout(() => {
+      this.network.off('replay_data', originalHandler);
+    }, 5000);
+  }
+
+  private renderCompareTurn(turn: number) {
+    this.compareTurn = turn;
+
+    const maxLeft = this.compareReplayLeft?.stats.totalTurns || 0;
+    const turnLeft = Math.min(turn, maxLeft);
+    if (this.compareReplayLeft && this.replayRendererLeft) {
+      const snapshot = this.compareReplayLeft.turnSnapshots[turnLeft];
+      if (snapshot) {
+        const gs: GameState = {
+          id: this.compareReplayLeft.gameId,
+          status: 'playing',
+          turn: snapshot.turn,
+          maxTurns: this.compareReplayLeft.maxTurns,
+          gridSize: this.compareReplayLeft.gridSize,
+          grid: snapshot.gridSnapshot,
+          players: this.compareReplayLeft.players,
+          colonies: snapshot.colonies,
+          globalEvents: [],
+          eventLog: [],
+          winnerId: null,
+          rankings: [],
+        };
+        this.replayRendererLeft.setGameState(gs);
+        const markers = this.compareReplayLeft.markers[turnLeft] || [];
+        this.replayRendererLeft.setMarkers(markers);
+      }
+      const labelLeft = document.getElementById('replay-progress-label-left') as HTMLElement;
+      if (labelLeft) labelLeft.textContent = String(turnLeft);
+      const progressLeft = document.getElementById('replay-progress-left') as HTMLInputElement;
+      if (progressLeft) progressLeft.value = String(turnLeft);
+    }
+
+    const maxRight = this.compareReplayRight?.stats.totalTurns || 0;
+    const turnRight = Math.min(turn, maxRight);
+    if (this.compareReplayRight && this.replayRendererRight) {
+      const snapshot = this.compareReplayRight.turnSnapshots[turnRight];
+      if (snapshot) {
+        const gs: GameState = {
+          id: this.compareReplayRight.gameId,
+          status: 'playing',
+          turn: snapshot.turn,
+          maxTurns: this.compareReplayRight.maxTurns,
+          gridSize: this.compareReplayRight.gridSize,
+          grid: snapshot.gridSnapshot,
+          players: this.compareReplayRight.players,
+          colonies: snapshot.colonies,
+          globalEvents: [],
+          eventLog: [],
+          winnerId: null,
+          rankings: [],
+        };
+        this.replayRendererRight.setGameState(gs);
+        const markers = this.compareReplayRight.markers[turnRight] || [];
+        this.replayRendererRight.setMarkers(markers);
+      }
+      const labelRight = document.getElementById('replay-progress-label-right') as HTMLElement;
+      if (labelRight) labelRight.textContent = String(turnRight);
+      const progressRight = document.getElementById('replay-progress-right') as HTMLInputElement;
+      if (progressRight) progressRight.value = String(turnRight);
+    }
+
+    this.renderDiffSummary(turn);
+  }
+
+  private renderDiffSummary(turn: number) {
+    const panel = document.getElementById('replay-diff-summary') as HTMLElement;
+    if (!panel) return;
+    if (!this.compareReplayLeft || !this.compareReplayRight) {
+      panel.innerHTML = '<div class="replay-event-empty">请先加载两场回放</div>';
+      return;
+    }
+
+    const maxLeft = this.compareReplayLeft.stats.totalTurns;
+    const maxRight = this.compareReplayRight.stats.totalTurns;
+    const turnL = Math.min(turn, maxLeft);
+    const turnR = Math.min(turn, maxRight);
+
+    const snapL = this.compareReplayLeft.turnSnapshots[turnL];
+    const snapR = this.compareReplayRight.turnSnapshots[turnR];
+    if (!snapL || !snapR) {
+      panel.innerHTML = '<div class="replay-event-empty">无数据</div>';
+      return;
+    }
+
+    const totalAreaL = Object.values(snapL.playerAreas).reduce((a, b) => a + b, 0);
+    const totalAreaR = Object.values(snapR.playerAreas).reduce((a, b) => a + b, 0);
+    const aliveCountL = Object.keys(snapL.playerAreas).filter(
+      (pid) => (snapL.playerAreas[pid] || 0) > 0
+    ).length;
+    const aliveCountR = Object.keys(snapR.playerAreas).filter(
+      (pid) => (snapR.playerAreas[pid] || 0) > 0
+    ).length;
+
+    const eventsL = this.compareReplayLeft.turnEvents[turnL] || [];
+    const eventsR = this.compareReplayRight.turnEvents[turnR] || [];
+    const killCount = (events: EventLogEntry[]) =>
+      events.filter(
+        (e) =>
+          (e.type === 'attack' && e.message.includes('击败')) ||
+          e.type === 'elimination'
+      ).length;
+    const killsL = killCount(eventsL);
+    const killsR = killCount(eventsR);
+
+    const areaDiff = totalAreaL - totalAreaR;
+    const killDiff = killsL - killsR;
+    const aliveDiff = aliveCountL - aliveCountR;
+
+    const diffStr = (diff: number) => {
+      if (diff > 0) return `<span style="color:var(--success)">+${diff}</span>`;
+      if (diff < 0) return `<span style="color:var(--danger)">${diff}</span>`;
+      return `<span style="color:var(--text-muted)">0</span>`;
+    };
+
+    panel.innerHTML = `
+      <div class="diff-current-turn">
+        <span>A回合 <strong>${turnL}</strong> / B回合 <strong>${turnR}</strong></span>
+      </div>
+      <div class="diff-row">
+        <span class="diff-label">总领地数差</span>
+        <span class="diff-values">A: ${totalAreaL} / B: ${totalAreaR}</span>
+        <span class="diff-badge">${diffStr(areaDiff)}</span>
+      </div>
+      <div class="diff-row">
+        <span class="diff-label">本回合击杀差</span>
+        <span class="diff-values">A: ${killsL} / B: ${killsR}</span>
+        <span class="diff-badge">${diffStr(killDiff)}</span>
+      </div>
+      <div class="diff-row">
+        <span class="diff-label">活跃玩家数差</span>
+        <span class="diff-values">A: ${aliveCountL} / B: ${aliveCountR}</span>
+        <span class="diff-badge">${diffStr(aliveDiff)}</span>
+      </div>
+      <div class="diff-player-section">
+        <div class="diff-player-subtitle">A - 玩家领地</div>
+        ${this.renderComparePlayerList(this.compareReplayLeft, snapL)}
+      </div>
+      <div class="diff-player-section">
+        <div class="diff-player-subtitle">B - 玩家领地</div>
+        ${this.renderComparePlayerList(this.compareReplayRight, snapR)}
+      </div>
+    `;
+  }
+
+  private renderComparePlayerList(
+    replay: ReplayData,
+    snap: { playerAreas: Record<string, number> }
+  ) {
+    const players = replay.players.filter((p) => !p.isSpectator);
+    const sorted = [...players].sort((a, b) => {
+      const aa = snap.playerAreas[a.id] || 0;
+      const bb = snap.playerAreas[b.id] || 0;
+      return bb - aa;
+    });
+    return sorted
+      .map(
+        (p, idx) => `
+        <div class="diff-player-row">
+          <span class="diff-rank">#${idx + 1}</span>
+          <span class="diff-player-color" style="background:${p.color}"></span>
+          <span class="diff-player-name">${this.escapeHtml(p.name)}</span>
+          <span class="diff-player-area">${snap.playerAreas[p.id] || 0}</span>
+        </div>
+      `
+      )
+      .join('');
+  }
+
+  private seekCompareTurn(turn: number, source: 'left' | 'right') {
+    const ratio =
+      source === 'left'
+        ? turn / (this.compareReplayLeft?.stats.totalTurns || 1)
+        : turn / (this.compareReplayRight?.stats.totalTurns || 1);
+
+    const targetLeft = Math.round(
+      ratio * (this.compareReplayLeft?.stats.totalTurns || 0)
+    );
+    const targetRight = Math.round(
+      ratio * (this.compareReplayRight?.stats.totalTurns || 0)
+    );
+
+    const commonTurn = source === 'left' ? targetLeft : targetRight;
+    this.renderCompareTurn(commonTurn);
+  }
+
+  private toggleComparePlay() {
+    this.compareIsPlaying = !this.compareIsPlaying;
+    this.updateComparePlayButton();
+    if (this.compareIsPlaying) {
+      this.startComparePlayback();
+    } else {
+      this.stopComparePlayback();
+    }
+  }
+
+  private updateComparePlayButton() {
+    const iconEl = document.getElementById('replay-play-icon-compare') as HTMLElement;
+    const textEl = document.getElementById('replay-play-text-compare') as HTMLElement;
+    if (iconEl) iconEl.textContent = this.compareIsPlaying ? '⏸' : '▶';
+    if (textEl) textEl.textContent = this.compareIsPlaying ? '暂停' : '播放';
+  }
+
+  private startComparePlayback() {
+    if (this.comparePlaybackTimer) {
+      clearInterval(this.comparePlaybackTimer);
+    }
+    const baseInterval = 1000;
+    const interval = baseInterval / this.comparePlaybackSpeed;
+    this.comparePlaybackTimer = window.setInterval(() => {
+      const maxL = this.compareReplayLeft?.stats.totalTurns || 0;
+      const maxR = this.compareReplayRight?.stats.totalTurns || 0;
+      const maxTurn = Math.max(maxL, maxR);
+      if (this.compareTurn >= maxTurn) {
+        this.stopComparePlayback();
+        this.compareIsPlaying = false;
+        this.updateComparePlayButton();
+        return;
+      }
+      this.compareTurn++;
+      this.renderCompareTurn(this.compareTurn);
+    }, interval);
+  }
+
+  private stopComparePlayback() {
+    if (this.comparePlaybackTimer) {
+      clearInterval(this.comparePlaybackTimer);
+      this.comparePlaybackTimer = null;
+    }
+  }
+
+  private setComparePlaybackSpeed(speed: number) {
+    this.comparePlaybackSpeed = speed;
+    document.querySelectorAll('.btn-speed-compare').forEach((btn) => {
+      const el = btn as HTMLElement;
+      el.classList.toggle(
+        'active',
+        parseInt(el.dataset.speed || '1', 10) === speed
+      );
+    });
+    if (this.compareIsPlaying) {
+      this.stopComparePlayback();
+      this.startComparePlayback();
     }
   }
 }
