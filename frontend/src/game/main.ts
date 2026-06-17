@@ -224,37 +224,53 @@ class GameController {
       this.requestRoomList();
     });
 
-    document.querySelectorAll('.btn-action').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const target = e.currentTarget as HTMLElement;
-        const action = target.dataset.action as ActionType;
+    document.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement;
+
+      const actionBtn = target.closest('.btn-action') as HTMLElement;
+      if (actionBtn) {
+        const action = actionBtn.dataset.action as ActionType;
         if (action) {
           this.setCurrentAction(action);
         }
-      });
-    });
+        return;
+      }
 
-    document.querySelectorAll('.btn-marker').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const target = e.currentTarget as HTMLElement;
-        const markerType = target.dataset.marker as MarkerType;
+      const markerBtn = target.closest('.btn-marker') as HTMLElement;
+      if (markerBtn) {
+        const markerType = markerBtn.dataset.marker as MarkerType;
         if (markerType) {
           this.toggleMarkerMode(markerType);
         }
-      });
-    });
+        return;
+      }
 
-    this.setupChatHandlers('waiting-chat-input', 'waiting-chat-send', 'waiting-chat-messages');
-    this.setupChatHandlers('game-chat-input', 'game-chat-send', 'game-chat-messages');
-
-    document.querySelectorAll('.btn-quick-phrase').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const target = e.currentTarget as HTMLElement;
-        const phrase = target.dataset.phrase;
+      const quickPhraseBtn = target.closest('.btn-quick-phrase') as HTMLElement;
+      if (quickPhraseBtn) {
+        const phrase = quickPhraseBtn.dataset.phrase;
         if (phrase) {
           this.sendChatMessage(phrase);
         }
-      });
+        return;
+      }
+
+      const sendBtn = target.closest('.chat-send-btn') as HTMLElement;
+      if (sendBtn) {
+        const inputId = sendBtn.dataset.inputId;
+        if (inputId) {
+          this.sendChatFromInput(inputId);
+        }
+        return;
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      const target = e.target as HTMLElement;
+      if (target.classList.contains('chat-input') && e.key === 'Enter') {
+        e.preventDefault();
+        const inputId = target.id;
+        this.sendChatFromInput(inputId);
+      }
     });
 
     document.getElementById('btn-alliance-accept')?.addEventListener('click', () => {
@@ -600,8 +616,16 @@ class GameController {
     }
 
     this.renderer.setGameState(this.gameState!);
+    this.updateMarkerButtonsVisibility();
     this.updateGameScreen();
     this.addEventsToLog(this.gameState!.eventLog);
+  }
+
+  private updateMarkerButtonsVisibility() {
+    const markerButtons = document.querySelector('.marker-buttons');
+    if (markerButtons && this.gameState) {
+      markerButtons.classList.toggle('hidden', this.gameState.status !== 'playing');
+    }
   }
 
   private handleDishClick(pos: Position) {
@@ -793,6 +817,8 @@ class GameController {
         statusEl.textContent = '规划你的操作，然后结束回合';
       }
     }
+
+    this.updateMarkerButtonsVisibility();
 
     this.updatePlayerStats();
     this.updateSubmitStatus();

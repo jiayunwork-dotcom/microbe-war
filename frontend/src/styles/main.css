@@ -930,6 +930,10 @@ html, body {
   margin-bottom: 10px;
 }
 
+.marker-buttons.hidden {
+  display: none;
+}
+
 .btn-marker {
   display: flex;
   flex-direction: column;
