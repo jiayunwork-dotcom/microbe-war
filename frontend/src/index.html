@@ -33,7 +33,15 @@
                             <label>房间名称</label>
                             <input type="text" id="room-name-create" placeholder="房间名称" maxlength="20">
                         </div>
+                        <div class="form-group">
+                            <label>选择地图</label>
+                            <select id="map-select-create">
+                                <option value="">🎲 随机地图</option>
+                            </select>
+                            <button id="btn-refresh-maps" class="btn btn-secondary btn-small" style="margin-top:4px;">刷新地图列表</button>
+                        </div>
                         <button id="btn-create-room" class="btn btn-primary">创建房间</button>
+                        <button id="btn-open-map-editor" class="btn btn-secondary" style="margin-top:8px;">🗺️ 地图工坊</button>
                     </div>
 
                     <div class="lobby-section">
@@ -80,12 +88,122 @@
             </div>
         </div>
 
+        <div id="map-editor-screen" class="screen">
+            <div class="map-editor-container">
+                <div class="map-editor-header">
+                    <h1>🗺️ 地图工坊</h1>
+                    <div class="map-editor-header-actions">
+                        <button id="btn-map-editor-back" class="btn btn-secondary">返回大厅</button>
+                    </div>
+                </div>
+
+                <div class="map-editor-main">
+                    <div class="map-editor-tools">
+                        <div class="panel-section">
+                            <h3>地形画笔</h3>
+                            <div class="terrain-buttons">
+                                <button class="btn-terrain active" data-terrain="normal">
+                                    <span class="terrain-color" style="background:#d4c4a8;"></span>
+                                    <span class="terrain-label">普通</span>
+                                </button>
+                                <button class="btn-terrain" data-terrain="high_nutrient">
+                                    <span class="terrain-color" style="background:#7cb342;"></span>
+                                    <span class="terrain-label">高营养</span>
+                                </button>
+                                <button class="btn-terrain" data-terrain="barren">
+                                    <span class="terrain-color" style="background:#a1887f;"></span>
+                                    <span class="terrain-label">贫瘠</span>
+                                </button>
+                                <button class="btn-terrain" data-terrain="toxin">
+                                    <span class="terrain-color" style="background:#8e24aa;"></span>
+                                    <span class="terrain-label">毒素</span>
+                                </button>
+                                <button class="btn-terrain" data-terrain="barrier">
+                                    <span class="terrain-color" style="background:#37474f;"></span>
+                                    <span class="terrain-label">屏障</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="panel-section">
+                            <h3>画笔大小</h3>
+                            <div class="brush-size-buttons">
+                                <button class="btn-brush-size active" data-size="1">1格</button>
+                                <button class="btn-brush-size" data-size="3">3x3</button>
+                                <button class="btn-brush-size" data-size="5">5x5</button>
+                            </div>
+                        </div>
+
+                        <div class="panel-section">
+                            <h3>对称模式</h3>
+                            <div class="symmetry-buttons">
+                                <button class="btn-symmetry active" data-symmetry="none">无对称</button>
+                                <button class="btn-symmetry" data-symmetry="horizontal">水平对称</button>
+                                <button class="btn-symmetry" data-symmetry="vertical">垂直对称</button>
+                                <button class="btn-symmetry" data-symmetry="four_way">四向对称</button>
+                            </div>
+                        </div>
+
+                        <div class="panel-section">
+                            <h3>编辑模式</h3>
+                            <div class="edit-mode-buttons">
+                                <button class="btn-edit-mode active" data-mode="terrain">🖌️ 绘制地形</button>
+                                <button class="btn-edit-mode" data-mode="spawn">📍 放置出生点</button>
+                            </div>
+                            <div id="spawn-points-info" class="spawn-points-info">
+                                出生点数量: <span id="spawn-count">0</span> / 6
+                            </div>
+                            <div id="spawn-warning" class="spawn-warning" style="display:none;"></div>
+                        </div>
+
+                        <div class="panel-section">
+                            <h3>地图操作</h3>
+                            <div class="form-group">
+                                <label>地图名称</label>
+                                <input type="text" id="map-name-input" placeholder="输入地图名称" maxlength="20">
+                            </div>
+                            <button id="btn-validate-map" class="btn btn-secondary btn-full">✅ 验证地图</button>
+                            <button id="btn-save-map" class="btn btn-primary btn-full" style="margin-top:6px;">💾 保存地图</button>
+                            <button id="btn-clear-map" class="btn btn-danger btn-full" style="margin-top:6px;">🗑️ 清空地图</button>
+                            <div id="map-validation-result" class="map-validation-result"></div>
+                        </div>
+
+                        <div class="panel-section">
+                            <h3>已保存地图</h3>
+                            <div id="saved-map-list" class="saved-map-list">加载中...</div>
+                            <button id="btn-refresh-saved-maps" class="btn btn-secondary btn-full">刷新列表</button>
+                        </div>
+                    </div>
+
+                    <div class="map-editor-canvas-wrap">
+                        <canvas id="map-editor-canvas" width="600" height="600"></canvas>
+                        <div class="map-editor-legend">
+                            <div class="legend-item"><span class="legend-color" style="background:#d4c4a8;"></span>普通</div>
+                            <div class="legend-item"><span class="legend-color" style="background:#7cb342;"></span>高营养(2x)</div>
+                            <div class="legend-item"><span class="legend-color" style="background:#a1887f;"></span>贫瘠(0.25x)</div>
+                            <div class="legend-item"><span class="legend-color" style="background:#8e24aa;"></span>毒素(-2/回合)</div>
+                            <div class="legend-item"><span class="legend-color" style="background:#37474f;"></span>屏障(不可通行)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div id="waiting-screen" class="screen">
             <div class="waiting-container">
                 <h1>等待玩家加入</h1>
                 <div class="room-info">
                     <p>房间ID: <span id="waiting-room-id">-</span></p>
                     <p>当前玩家: <span id="waiting-player-count">0</span> / 6</p>
+                    <p id="waiting-map-info" style="display:none;">当前地图: <span id="waiting-map-name">随机地图</span></p>
+                </div>
+                <div id="waiting-map-settings" class="waiting-map-settings" style="display:none;">
+                    <div class="form-group">
+                        <label>选择地图</label>
+                        <select id="waiting-map-select">
+                            <option value="">🎲 随机地图</option>
+                        </select>
+                    </div>
                 </div>
                 <div id="waiting-players" class="waiting-players"></div>
                 <div class="waiting-actions">

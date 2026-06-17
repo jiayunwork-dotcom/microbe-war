@@ -9,6 +9,33 @@ export type GlobalEventType =
   | 'nutrient_depletion'
   | 'phage_ outbreak';
 
+export type TerrainType = 'normal' | 'high_nutrient' | 'barren' | 'toxin' | 'barrier';
+export type SymmetryMode = 'none' | 'horizontal' | 'vertical' | 'four_way';
+export type BrushSize = 1 | 3 | 5;
+export type EditMode = 'terrain' | 'spawn';
+
+export interface CustomMapData {
+  mapId: string;
+  name: string;
+  createdAt: number;
+  gridSize: number;
+  terrain: TerrainType[][];
+  spawnPoints: Position[];
+}
+
+export interface MapListItem {
+  mapId: string;
+  name: string;
+  createdAt: number;
+  spawnCount: number;
+}
+
+export interface MapValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings?: string[];
+}
+
 export interface Position {
   x: number;
   y: number;
@@ -45,6 +72,7 @@ export interface CellEnvironment {
   temperature: number;
   pH: number;
   antibiotics: Partial<Record<AntibioticType, number>>;
+  terrain: TerrainType;
 }
 
 export interface Cell {
@@ -114,6 +142,8 @@ export interface RoomInfo {
   maxPlayers: number;
   hostName: string;
   turn?: number;
+  customMapId: string | null;
+  customMapName?: string;
 }
 
 export type MarkerType = 'danger' | 'target' | 'defense';
@@ -157,7 +187,12 @@ export type ClientMessageType =
   | 'alliance_request'
   | 'alliance_respond'
   | 'request_replay'
-  | 'request_replay_list';
+  | 'request_replay_list'
+  | 'list_maps'
+  | 'validate_map'
+  | 'save_map'
+  | 'get_map'
+  | 'set_room_map';
 
 export type ServerMessageType =
   | 'room_created'
@@ -184,7 +219,12 @@ export type ServerMessageType =
   | 'alliances_update'
   | 'replay_data'
   | 'replay_list'
-  | 'game_ended_with_stats';
+  | 'game_ended_with_stats'
+  | 'map_saved'
+  | 'map_list'
+  | 'map_data'
+  | 'map_validation'
+  | 'room_updated';
 
 export interface ClientMessage {
   type: ClientMessageType;

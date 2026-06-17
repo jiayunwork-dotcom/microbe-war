@@ -20,6 +20,7 @@ import {
   triggerGlobalEvent,
   isInsideDish,
   getDishCellCount,
+  createInitialGridFromCustomMap,
 } from './environment';
 import {
   MICROBE_TEMPLATES,
@@ -36,6 +37,7 @@ import {
   MUTATION_POOL,
 } from './mutations';
 import { v4 as uuidv4 } from 'uuid';
+import { CustomMapData } from './types';
 
 export const MAX_TURNS = 40;
 export const INITIAL_BIOMASS = 50;
@@ -47,19 +49,28 @@ export const HIGH_TEMP_DAMAGE_THRESHOLD = 42;
 export const LOW_TEMP_DAMAGE_THRESHOLD = 25;
 export const VICTORY_AREA_PERCENTAGE = 0.60;
 
-export function createGameState(players: Player[]): GameState {
+export function createGameState(
+  players: Player[],
+  customMap: CustomMapData | null = null
+): GameState {
   const gridSize = GRID_SIZE;
-  const grid = createInitialGrid(gridSize);
+  const grid = customMap
+    ? createInitialGridFromCustomMap(gridSize, customMap)
+    : createInitialGrid(gridSize);
   const colonies: Colony[] = [];
   const actualPlayers = players.filter((p) => !p.isSpectator);
 
-  const startPositions = getStartPositions(actualPlayers.length, gridSize);
+  const startPositions = customMap
+    ? getStartPositionsFromMap(actualPlayers.length, customMap)
+    : getStartPositions(actualPlayers.length, gridSize);
 
   actualPlayers.forEach((player, index) => {
     const pos = startPositions[index];
-    const colony = createInitialColony(player, pos);
-    colonies.push(colony);
-    grid[pos.y][pos.x].colony = colony;
+    if (grid[pos.y]?.[pos.x]?.environment.terrain !== 'barrier') {
+      const colony = createInitialColony(player, pos);
+      colonies.push(colony);
+      grid[pos.y][pos.x].colony = colony;
+    }
   });
 
   const gameState: GameState = {
@@ -106,6 +117,27 @@ function getStartPositions(count: number, gridSize: number): Position[] {
     }
 
     positions.push({ x, y });
+  }
+
+  return positions;
+}
+
+function getStartPositionsFromMap(
+  count: number,
+  customMap: CustomMapData
+): Position[] {
+  const spawns = customMap.spawnPoints || [];
+  const positions: Position[] = [];
+
+  for (let i = 0; i < count; i++) {
+    if (i < spawns.length) {
+      positions.push({ ...spawns[i] });
+    } else {
+      positions.push(
+        ...getStartPositions(count - positions.length, customMap.gridSize)
+      );
+      break;
+    }
   }
 
   return positions;
@@ -160,6 +192,7 @@ export function processTurn(
   gameState.turn++;
 
   phaseNutrientUptake(gameState, turnEvents);
+  phaseToxinDamage(gameState, turnEvents);
   phasePhageInjectionResolution(gameState, turnEvents, turnKills);
   phaseReproductionAndSpread(gameState, actions, turnEvents, turnKills);
   phaseAttackResolution(gameState, actions, turnEvents, turnKills);
@@ -179,6 +212,19 @@ export function processTurn(
   }
 
   return { events: turnEvents, kills: turnKills };
+}
+
+function phaseToxinDamage(
+  gameState: GameState,
+  events: EventLogEntry[]
+) {
+  const TOXIN_DAMAGE = 2;
+  for (const colony of gameState.colonies) {
+    const cell = gameState.grid[colony.position.y][colony.position.x];
+    if (cell.environment.terrain === 'toxin') {
+      colony.biomass = Math.max(0, colony.biomass - TOXIN_DAMAGE);
+    }
+  }
 }
 
 function phaseNutrientUptake(
@@ -302,6 +348,7 @@ function getChemotaxisTargets(
       if (!isInsideDish(nx, ny, gameState.gridSize)) continue;
 
       const cell = gameState.grid[ny][nx];
+      if (cell.environment.terrain === 'barrier') continue;
       let score = cell.environment.nutrient * 10;
 
       const fit = calculateEnvironmentFitness(
@@ -348,7 +395,13 @@ function resolveSpreadAttempts(
   const cellContestMap = new Map<string, Colony[]>();
 
   for (const attempt of attempts) {
-    const key = `${attempt.targetPos.x},${attempt.targetPos.y}`;
+    const tx = attempt.targetPos.x;
+    const ty = attempt.targetPos.y;
+    const targetCell = gameState.grid[ty]?.[tx];
+    if (!targetCell) continue;
+    if (targetCell.environment.terrain === 'barrier') continue;
+
+    const key = `${tx},${ty}`;
     if (!cellContestMap.has(key)) {
       cellContestMap.set(key, []);
     }
@@ -766,6 +819,8 @@ function phaseAttackResolution(
     if (target.x < 0 || target.x >= gameState.gridSize || target.y < 0 || target.y >= gameState.gridSize) continue;
 
     const targetCell = gameState.grid[target.y][target.x];
+    if (targetCell.environment.terrain === 'barrier') continue;
+
     const dist = Math.sqrt(
       Math.pow(target.x - attackerColony.position.x, 2) +
         Math.pow(target.y - attackerColony.position.y, 2)
@@ -836,6 +891,7 @@ function aoeToxinAttack(
       if (nx < 0 || nx >= gameState.gridSize || ny < 0 || ny >= gameState.gridSize) continue;
 
       const cell = gameState.grid[ny][nx];
+      if (cell.environment.terrain === 'barrier') continue;
       if (!cell.colony || cell.colony.playerId === attacker.playerId) continue;
 
       const defender = cell.colony;
@@ -947,6 +1003,7 @@ function drainSurroundingNutrients(gameState: GameState, colony: Colony) {
       if (dist > 2) continue;
 
       const cell = gameState.grid[ny][nx];
+      if (cell.environment.terrain === 'barrier') continue;
       const drainAmount = cell.environment.nutrient * 0.05 * (1 - dist / 3);
       cell.environment.nutrient = Math.max(0, cell.environment.nutrient - drainAmount);
     }

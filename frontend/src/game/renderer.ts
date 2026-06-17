@@ -8,6 +8,7 @@ import {
   ActionType,
   TacticalMarker,
   MarkerType,
+  TerrainType,
 } from './types.js';
 
 export interface RenderAnimation {
@@ -221,6 +222,7 @@ export class DishRenderer {
     ctx.clip();
 
     this.drawNutrientLayer();
+    this.drawTerrainLayer();
     this.drawAntibioticLayer();
     this.drawTemperatureLayer();
     this.drawColonies();
@@ -337,6 +339,71 @@ export class DishRenderer {
           const intensity = Math.min(1, (30 - temp) / 10);
           ctx.fillStyle = `rgba(100, 150, 255, ${intensity * 0.2})`;
           ctx.fillRect(sx, sy, this.cellSize + 1, this.cellSize + 1);
+        }
+      }
+    }
+  }
+
+  private drawTerrainLayer() {
+    if (!this.state.gameState) return;
+    const ctx = this.ctx;
+    const size = this.state.gameState.gridSize;
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        if (!this.isGridInsideDish(x, y, size)) continue;
+        const cell = this.state.gameState.grid[y][x];
+        const terrain = (cell.environment as any).terrain as TerrainType | undefined;
+        if (!terrain || terrain === 'normal') continue;
+
+        const sx = this.gridOffset.x + x * this.cellSize;
+        const sy = this.gridOffset.y + y * this.cellSize;
+        const cs = this.cellSize + 1;
+
+        switch (terrain) {
+          case 'high_nutrient':
+            ctx.fillStyle = 'rgba(124, 179, 66, 0.28)';
+            ctx.fillRect(sx, sy, cs, cs);
+            ctx.strokeStyle = 'rgba(124, 179, 66, 0.6)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(sx + 1, sy + 1, cs - 2, cs - 2);
+            break;
+          case 'barren':
+            ctx.fillStyle = 'rgba(161, 136, 127, 0.32)';
+            ctx.fillRect(sx, sy, cs, cs);
+            ctx.strokeStyle = 'rgba(120, 90, 70, 0.5)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(sx + 1, sy + 1, cs - 2, cs - 2);
+            break;
+          case 'toxin':
+            ctx.fillStyle = 'rgba(142, 36, 170, 0.22)';
+            ctx.fillRect(sx, sy, cs, cs);
+            ctx.beginPath();
+            ctx.arc(
+              sx + this.cellSize / 2,
+              sy + this.cellSize / 2,
+              this.cellSize * 0.18,
+              0,
+              Math.PI * 2
+            );
+            ctx.fillStyle = 'rgba(186, 104, 200, 0.8)';
+            ctx.fill();
+            break;
+          case 'barrier':
+            ctx.fillStyle = 'rgba(55, 71, 79, 0.85)';
+            ctx.fillRect(sx, sy, cs, cs);
+            ctx.strokeStyle = 'rgba(20, 25, 30, 0.9)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(sx + 2, sy + 2, cs - 4, cs - 4);
+            ctx.beginPath();
+            ctx.moveTo(sx + 4, sy + 4);
+            ctx.lineTo(sx + cs - 4, sy + cs - 4);
+            ctx.moveTo(sx + cs - 4, sy + 4);
+            ctx.lineTo(sx + 4, sy + cs - 4);
+            ctx.strokeStyle = 'rgba(20, 25, 30, 0.5)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            break;
         }
       }
     }

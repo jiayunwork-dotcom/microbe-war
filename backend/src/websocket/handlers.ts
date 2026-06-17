@@ -8,6 +8,7 @@ import {
   PlayerAction,
   Player,
   MarkerType,
+  CustomMapData,
 } from '../game/types';
 import { createPlayer } from '../game/engine';
 
@@ -65,10 +66,12 @@ export function setupWebSocketHandlers(
             playerName,
             microbeType,
             roomName,
+            customMapId,
           }: {
             playerName: string;
             microbeType: MicrobeType;
             roomName: string;
+            customMapId?: string | null;
           } = msg.payload || {};
 
           if (!playerName || !microbeType) {
@@ -79,7 +82,8 @@ export function setupWebSocketHandlers(
             cid,
             roomName || `房间`,
             playerName,
-            microbeType
+            microbeType,
+            customMapId || null
           );
 
           if (!result) {
@@ -354,6 +358,81 @@ export function setupWebSocketHandlers(
           roomManager.sendToClient(cid, {
             type: 'replay_list',
             payload: { replays: roomManager.getReplayList() },
+          });
+          break;
+        }
+
+        case 'list_maps': {
+          roomManager.sendToClient(cid, {
+            type: 'map_list',
+            payload: { maps: roomManager.mapManager.getMapList() },
+          });
+          break;
+        }
+
+        case 'validate_map': {
+          const { mapData }: { mapData: Omit<CustomMapData, 'mapId' | 'createdAt'> } =
+            msg.payload || {};
+          if (!mapData) {
+            return sendError(cid, '缺少地图数据');
+          }
+          const result = roomManager.mapManager.validateMap(mapData);
+          roomManager.sendToClient(cid, {
+            type: 'map_validation',
+            payload: result,
+          });
+          break;
+        }
+
+        case 'save_map': {
+          const { mapData }: { mapData: Omit<CustomMapData, 'mapId' | 'createdAt'> } =
+            msg.payload || {};
+          if (!mapData) {
+            return sendError(cid, '缺少地图数据');
+          }
+          const saved = roomManager.mapManager.saveMap(mapData);
+          if (!saved) {
+            return sendError(cid, '地图保存失败，请先验证地图');
+          }
+          roomManager.sendToClient(cid, {
+            type: 'map_saved',
+            payload: { map: saved },
+          });
+          break;
+        }
+
+        case 'get_map': {
+          const { mapId }: { mapId: string } = msg.payload || {};
+          if (!mapId) {
+            return sendError(cid, '缺少地图ID');
+          }
+          const map = roomManager.mapManager.getMap(mapId);
+          if (!map) {
+            return sendError(cid, '未找到地图');
+          }
+          roomManager.sendToClient(cid, {
+            type: 'map_data',
+            payload: { map },
+          });
+          break;
+        }
+
+        case 'set_room_map': {
+          const { roomId, customMapId }: { roomId?: string; customMapId: string | null } =
+            msg.payload || {};
+          const c = roomManager.getClient(cid);
+          const actualRoomId = roomId || c?.roomId;
+          if (!actualRoomId) {
+            return sendError(cid, '未在房间中');
+          }
+          const ok = roomManager.setRoomMap(cid, actualRoomId, customMapId);
+          if (!ok) {
+            return sendError(cid, '设置地图失败（需房主权限）');
+          }
+          const info = roomManager.getRoomInfo(actualRoomId);
+          roomManager.broadcastToRoom(actualRoomId, {
+            type: 'room_updated',
+            payload: { roomInfo: info },
           });
           break;
         }

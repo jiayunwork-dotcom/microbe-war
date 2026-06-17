@@ -84,6 +84,14 @@ export class GameWebSocket {
     }
   }
 
+  once(type: ServerMessageType, handler: MessageHandler) {
+    const wrapped: MessageHandler = (payload) => {
+      this.off(type, wrapped);
+      handler(payload);
+    };
+    this.on(type, wrapped);
+  }
+
   private dispatch(msg: ServerMessage) {
     const list = this.handlers.get(msg.type);
     if (list) {

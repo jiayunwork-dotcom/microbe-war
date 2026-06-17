@@ -13,6 +13,7 @@ import {
   MarkerType,
   ReplayData,
   KillEvent,
+  CustomMapData,
 } from '../game/types';
 import {
   createGameState,
@@ -21,6 +22,7 @@ import {
 } from '../game/engine';
 import { v4 as uuidv4 } from 'uuid';
 import { ReplayManager } from './ReplayManager';
+import { MapManager } from './MapManager';
 
 export interface ConnectedClient {
   ws: WebSocket;
@@ -42,12 +44,14 @@ interface Room {
   chatMessages: ChatMessage[];
   markers: TacticalMarker[];
   alliances: Alliance[];
+  customMapId: string | null;
 }
 
 export class RoomManager {
   private rooms: Map<string, Room> = new Map();
   private clients: Map<string, ConnectedClient> = new Map();
   private replayManager: ReplayManager = new ReplayManager();
+  public mapManager: MapManager = new MapManager();
 
   addClient(clientId: string, client: ConnectedClient) {
     this.clients.set(clientId, client);
@@ -69,7 +73,8 @@ export class RoomManager {
     clientId: string,
     roomName: string,
     playerName: string,
-    microbeType: MicrobeType
+    microbeType: MicrobeType,
+    customMapId: string | null = null
   ): { roomId: string; playerId: string } | null {
     const client = this.clients.get(clientId);
     if (!client) return null;
@@ -94,6 +99,7 @@ export class RoomManager {
       chatMessages: [],
       markers: [],
       alliances: [],
+      customMapId,
     };
 
     client.roomId = roomId;
@@ -237,7 +243,10 @@ export class RoomManager {
       room.gameState.players[idx].isHost = true;
     }
 
-    const freshState = createGameState(room.gameState.players);
+    const customMap = room.customMapId
+      ? this.mapManager.getMap(room.customMapId)
+      : null;
+    const freshState = createGameState(room.gameState.players, customMap);
     room.gameState = freshState;
     room.gameState.status = 'playing';
 
@@ -477,6 +486,9 @@ export class RoomManager {
         const host = room.gameState.players.find((p) => p.id === room.hostId);
         if (host) hostName = host.name;
       }
+      const customMap = room.customMapId
+        ? this.mapManager.getMap(room.customMapId)
+        : null;
       infos.push({
         id: room.id,
         name: room.name,
@@ -485,6 +497,8 @@ export class RoomManager {
         maxPlayers: room.maxPlayers,
         hostName,
         turn: room.gameState?.turn,
+        customMapId: room.customMapId,
+        customMapName: customMap?.name,
       });
     }
     return infos;
@@ -498,6 +512,9 @@ export class RoomManager {
       const host = room.gameState.players.find((p) => p.id === room.hostId);
       if (host) hostName = host.name;
     }
+    const customMap = room.customMapId
+      ? this.mapManager.getMap(room.customMapId)
+      : null;
     return {
       id: room.id,
       name: room.name,
@@ -506,7 +523,23 @@ export class RoomManager {
       maxPlayers: room.maxPlayers,
       hostName,
       turn: room.gameState?.turn,
+      customMapId: room.customMapId,
+      customMapName: customMap?.name,
     };
+  }
+
+  setRoomMap(
+    clientId: string,
+    roomId: string,
+    customMapId: string | null
+  ): boolean {
+    const room = this.rooms.get(roomId);
+    const client = this.clients.get(clientId);
+    if (!room || !client) return false;
+    if (room.hostId !== client.playerId) return false;
+    if (customMapId && !this.mapManager.getMap(customMapId)) return false;
+    room.customMapId = customMapId;
+    return true;
   }
 
   getGameState(roomId: string): GameState | null {

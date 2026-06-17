@@ -10,6 +10,8 @@ import {
   NutrientDepletionEvent,
   TemperatureSurgeEvent,
   PhageOutbreakEvent,
+  CustomMapData,
+  TerrainType,
 } from './types';
 
 export const GRID_SIZE = 30;
@@ -71,6 +73,7 @@ export function createInitialGrid(size: number): Cell[][] {
         temperature,
         pH,
         antibiotics: {},
+        terrain: 'normal',
       };
 
       row.push({
@@ -352,4 +355,106 @@ function antibioticName(type: AntibioticType): string {
     tetracycline: '四环素',
   };
   return names[type];
+}
+
+export function createInitialGridFromCustomMap(
+  size: number,
+  customMap: CustomMapData
+): Cell[][] {
+  const grid: Cell[][] = [];
+  const center = (size - 1) / 2;
+  const radius = getDishRadius(size);
+
+  for (let y = 0; y < size; y++) {
+    const row: Cell[] = [];
+    for (let x = 0; x < size; x++) {
+      const distFromCenter = Math.sqrt(
+        Math.pow(x - center, 2) + Math.pow(y - center, 2)
+      );
+      const inside = distFromCenter <= radius;
+
+      let maxNutrient = 0;
+      let temperature = 25;
+      let pH = 7.0;
+
+      const terrain: TerrainType =
+        customMap.terrain[y]?.[x] || 'normal';
+
+      if (inside) {
+        const distFactor = 1 - distFromCenter / radius;
+        let baseNutrient =
+          MAX_NUTRIENT_EDGE +
+          (MAX_NUTRIENT_CENTER - MAX_NUTRIENT_EDGE) * distFactor;
+
+        switch (terrain) {
+          case 'high_nutrient':
+            baseNutrient *= 2;
+            break;
+          case 'barren':
+            baseNutrient *= 0.25;
+            break;
+          case 'barrier':
+            baseNutrient = 0;
+            break;
+          default:
+            break;
+        }
+
+        maxNutrient = baseNutrient;
+        temperature = 35 + Math.random() * 5 - 2.5;
+        pH = 6.8 + Math.random() * 0.8 - 0.4;
+      }
+
+      const environment: CellEnvironment = {
+        nutrient: maxNutrient,
+        maxNutrient: maxNutrient,
+        temperature,
+        pH,
+        antibiotics: {},
+        terrain,
+      };
+
+      row.push({
+        position: { x, y },
+        colony: null,
+        environment,
+      });
+    }
+    grid.push(row);
+  }
+
+  addRandomHotSpotsFromTerrain(grid, size, customMap.terrain);
+  addRandomPhZones(grid, size);
+
+  return grid;
+}
+
+function addRandomHotSpotsFromTerrain(
+  grid: Cell[][],
+  size: number,
+  terrain: TerrainType[][]
+) {
+  const hotSpots = 2 + Math.floor(Math.random() * 3);
+  const dishRadius = getDishRadius(size);
+  const center = (size - 1) / 2;
+  for (let i = 0; i < hotSpots; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const r = Math.random() * dishRadius * 0.7;
+    const cx = Math.floor(center + Math.cos(angle) * r);
+    const cy = Math.floor(center + Math.sin(angle) * r);
+    const radius = 3 + Math.floor(Math.random() * 3);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        if (!isInsideDish(x, y, size)) continue;
+        if (terrain[y]?.[x] === 'barrier') continue;
+        const dist = Math.sqrt(
+          Math.pow(x - cx, 2) + Math.pow(y - cy, 2)
+        );
+        if (dist < radius) {
+          grid[y][x].environment.temperature +=
+            (5 + Math.random() * 5) * (1 - dist / radius);
+        }
+      }
+    }
+  }
 }

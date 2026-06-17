@@ -19,9 +19,17 @@ import {
   TurnAction,
   AllianceEvent,
   Highlight,
+  TerrainType,
+  SymmetryMode,
+  BrushSize,
+  EditMode,
+  MapListItem,
+  MapValidationResult,
+  CustomMapData,
 } from './types.js';
 import { GameWebSocket } from './network.js';
 import { DishRenderer, RenderAnimation } from './renderer.js';
+import { MapEditor, fetchMapList } from './mapEditor.js';
 
 const MICROBE_NAMES: Record<MicrobeType, string> = {
   bacteria: '🦠 细菌',
@@ -64,6 +72,9 @@ class GameController {
   private comparePlaybackTimer: number | null = null;
   private pendingCompareReplayId: string = '';
 
+  private mapEditor: MapEditor | null = null;
+  private cachedMaps: MapListItem[] = [];
+
   constructor() {
     this.network = new GameWebSocket();
   }
@@ -79,6 +90,7 @@ class GameController {
     this.setupNetworkHandlers();
     this.setupUIHandlers();
     this.requestRoomList();
+    this.refreshLobbyMapList();
     this.checkUrlReplayParam();
   }
 
@@ -237,6 +249,12 @@ class GameController {
 
     this.network.on('replay_list', (payload) => {
       console.log('Replay list:', payload.replays);
+    });
+
+    this.network.on('room_updated', (payload) => {
+      if (payload?.roomInfo && this.gameState) {
+        this.updateWaitingRoomWithMap(payload.roomInfo);
+      }
     });
   }
 
@@ -493,6 +511,100 @@ class GameController {
         this.seekCompareTurn(turn, 'right');
       });
     }
+
+    document.getElementById('btn-open-map-editor')?.addEventListener('click', () => {
+      this.openMapEditor();
+    });
+
+    document.getElementById('btn-map-editor-back')?.addEventListener('click', () => {
+      this.showScreen('lobby-screen');
+    });
+
+    document.querySelectorAll('.btn-terrain').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        document.querySelectorAll('.btn-terrain').forEach((b) =>
+          b.classList.remove('active')
+        );
+        const target = e.currentTarget as HTMLElement;
+        target.classList.add('active');
+        const terrain = target.dataset.terrain as TerrainType;
+        if (terrain && this.mapEditor) {
+          this.mapEditor.setTerrain(terrain);
+        }
+      });
+    });
+
+    document.querySelectorAll('.btn-brush-size').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        document.querySelectorAll('.btn-brush-size').forEach((b) =>
+          b.classList.remove('active')
+        );
+        const target = e.currentTarget as HTMLElement;
+        target.classList.add('active');
+        const size = parseInt(target.dataset.size || '1', 10) as BrushSize;
+        if (this.mapEditor) {
+          this.mapEditor.setBrushSize(size);
+        }
+      });
+    });
+
+    document.querySelectorAll('.btn-symmetry').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        document.querySelectorAll('.btn-symmetry').forEach((b) =>
+          b.classList.remove('active')
+        );
+        const target = e.currentTarget as HTMLElement;
+        target.classList.add('active');
+        const mode = target.dataset.symmetry as SymmetryMode;
+        if (mode && this.mapEditor) {
+          this.mapEditor.setSymmetryMode(mode);
+        }
+      });
+    });
+
+    document.querySelectorAll('.btn-edit-mode').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        document.querySelectorAll('.btn-edit-mode').forEach((b) =>
+          b.classList.remove('active')
+        );
+        const target = e.currentTarget as HTMLElement;
+        target.classList.add('active');
+        const mode = target.dataset.mode as EditMode;
+        if (mode && this.mapEditor) {
+          this.mapEditor.setEditMode(mode);
+        }
+      });
+    });
+
+    document.getElementById('btn-clear-map')?.addEventListener('click', () => {
+      if (this.mapEditor) {
+        if (confirm('确定要清空当前地图吗？')) {
+          this.mapEditor.clearMap();
+        }
+      }
+    });
+
+    document.getElementById('btn-validate-map')?.addEventListener('click', () => {
+      this.validateCurrentMap();
+    });
+
+    document.getElementById('btn-save-map')?.addEventListener('click', () => {
+      this.saveCurrentMap();
+    });
+
+    document.getElementById('btn-refresh-maps')?.addEventListener('click', () => {
+      this.refreshLobbyMapList();
+    });
+
+    document.getElementById('btn-refresh-saved-maps')?.addEventListener('click', () => {
+      this.refreshSavedMapList();
+    });
+
+    document.getElementById('waiting-map-select')?.addEventListener('change', (e) => {
+      const target = e.target as HTMLSelectElement;
+      const mapId = target.value || null;
+      this.setRoomMap(mapId);
+    });
   }
 
   private sendChatFromInput(inputId: string) {
@@ -570,10 +682,12 @@ class GameController {
     const nameEl = document.getElementById('player-name-create') as HTMLInputElement;
     const typeEl = document.getElementById('microbe-type-create') as HTMLSelectElement;
     const roomNameEl = document.getElementById('room-name-create') as HTMLInputElement;
+    const mapSelectEl = document.getElementById('map-select-create') as HTMLSelectElement;
 
     const name = nameEl.value.trim();
     const type = typeEl.value as MicrobeType;
     const roomName = roomNameEl.value.trim();
+    const customMapId = mapSelectEl?.value || null;
 
     if (!name) {
       this.showLobbyMessage('请输入玩家名称', true);
@@ -586,6 +700,7 @@ class GameController {
         playerName: name,
         microbeType: type,
         roomName: roomName || `${name}的房间`,
+        customMapId: customMapId || undefined,
       },
     });
   }
@@ -782,6 +897,82 @@ class GameController {
         startBtn.style.display = 'none';
       }
     }
+
+    this.updateWaitingRoomMapUI();
+  }
+
+  private updateWaitingRoomWithMap(roomInfo: RoomInfo) {
+    const mapNameEl = document.getElementById('waiting-map-name');
+    const mapInfoEl = document.getElementById('waiting-map-info');
+    if (mapInfoEl && mapNameEl) {
+      if (roomInfo.customMapId) {
+        mapInfoEl.style.display = 'block';
+        mapNameEl.textContent = roomInfo.customMapName || '自定义地图';
+      } else {
+        mapInfoEl.style.display = 'block';
+        mapNameEl.textContent = '🎲 随机地图';
+      }
+    }
+    if (this.gameState) {
+      this.updateWaitingRoom();
+    }
+  }
+
+  private async updateWaitingRoomMapUI() {
+    const me = this.gameState?.players.find((p) => p.id === this.myPlayerId);
+    const mapSettingsEl = document.getElementById('waiting-map-settings');
+    const mapInfoEl = document.getElementById('waiting-map-info');
+    const mapNameEl = document.getElementById('waiting-map-name');
+    const mapSelectEl = document.getElementById(
+      'waiting-map-select'
+    ) as HTMLSelectElement;
+
+    const roomInfo: RoomInfo | null = (window as any).__tempRoomInfo || null;
+    const customMapName =
+      roomInfo?.customMapName ||
+      (this.gameState as any)?.customMapName ||
+      null;
+    const customMapId =
+      roomInfo?.customMapId || (this.gameState as any)?.customMapId || null;
+
+    if (mapInfoEl && mapNameEl) {
+      mapInfoEl.style.display = 'block';
+      if (customMapId && customMapName) {
+        mapNameEl.textContent = customMapName;
+      } else if (customMapId) {
+        mapNameEl.textContent = '自定义地图';
+      } else {
+        mapNameEl.textContent = '🎲 随机地图';
+      }
+    }
+
+    if (mapSettingsEl) {
+      if (me?.isHost) {
+        mapSettingsEl.style.display = 'block';
+        if (mapSelectEl && mapSelectEl.options.length <= 1) {
+          await this.populateMapSelect(mapSelectEl, customMapId);
+        }
+      } else {
+        mapSettingsEl.style.display = 'none';
+      }
+    }
+  }
+
+  private async populateMapSelect(
+    selectEl: HTMLSelectElement,
+    selectedId: string | null
+  ) {
+    const maps = await fetchMapList(this.network);
+    this.cachedMaps = maps;
+    const currentVal = selectedId || '';
+    selectEl.innerHTML = '<option value="">🎲 随机地图</option>';
+    for (const m of maps) {
+      const opt = document.createElement('option');
+      opt.value = m.mapId;
+      opt.textContent = `${m.name} (${m.spawnCount}出生点)`;
+      selectEl.appendChild(opt);
+    }
+    selectEl.value = currentVal;
   }
 
   private startGameScreen() {
@@ -2300,6 +2491,183 @@ class GameController {
       this.stopComparePlayback();
       this.startComparePlayback();
     }
+  }
+
+  private openMapEditor() {
+    const canvas = document.getElementById(
+      'map-editor-canvas'
+    ) as HTMLCanvasElement;
+    if (!this.mapEditor && canvas) {
+      this.mapEditor = new MapEditor(canvas, this.network);
+    }
+    if (this.mapEditor) {
+      this.mapEditor.render();
+      this.refreshSavedMapList();
+    }
+    this.showScreen('map-editor-screen');
+  }
+
+  private async refreshLobbyMapList() {
+    const selectEl = document.getElementById(
+      'map-select-create'
+    ) as HTMLSelectElement;
+    if (!selectEl) return;
+    const maps = await fetchMapList(this.network);
+    this.cachedMaps = maps;
+    const current = selectEl.value;
+    selectEl.innerHTML = '<option value="">🎲 随机地图</option>';
+    for (const m of maps) {
+      const opt = document.createElement('option');
+      opt.value = m.mapId;
+      opt.textContent = `${m.name} (${m.spawnCount}出生点)`;
+      selectEl.appendChild(opt);
+    }
+    selectEl.value = current;
+  }
+
+  private async refreshSavedMapList() {
+    const listEl = document.getElementById('saved-map-list');
+    if (!listEl) return;
+    listEl.innerHTML = '<div>加载中...</div>';
+    const maps = await fetchMapList(this.network);
+    this.cachedMaps = maps;
+
+    if (maps.length === 0) {
+      listEl.innerHTML = '<div style="color:var(--text-secondary);padding:8px;">暂无保存的地图</div>';
+      return;
+    }
+
+    listEl.innerHTML = maps
+      .map((m) => {
+        const date = new Date(m.createdAt).toLocaleDateString('zh-CN');
+        return `
+          <div class="saved-map-item" data-map-id="${m.mapId}">
+            <div class="saved-map-item-title">${this.escapeHtml(m.name)}</div>
+            <div class="saved-map-item-info">${m.spawnCount}出生点 · ${date}</div>
+          </div>
+        `;
+      })
+      .join('');
+
+    listEl.querySelectorAll('.saved-map-item').forEach((el) => {
+      el.addEventListener('click', async () => {
+        const mapId = (el as HTMLElement).dataset.mapId;
+        if (mapId) {
+          await this.loadMapIntoEditor(mapId);
+        }
+      });
+    });
+  }
+
+  private async loadMapIntoEditor(mapId: string) {
+    return new Promise<void>((resolve) => {
+      const handler = (payload: any) => {
+        this.network.off('map_data', handler);
+        if (payload?.map && this.mapEditor) {
+          this.mapEditor.loadMap(payload.map as CustomMapData);
+          const nameInput = document.getElementById(
+            'map-name-input'
+          ) as HTMLInputElement;
+          if (nameInput) {
+            nameInput.value = payload.map.name || '';
+          }
+        }
+        resolve();
+      };
+      this.network.once('map_data', handler);
+      this.network.send({ type: 'get_map', payload: { mapId } });
+
+      setTimeout(() => {
+        this.network.off('map_data', handler);
+        resolve();
+      }, 5000);
+    });
+  }
+
+  private async validateCurrentMap() {
+    if (!this.mapEditor) return;
+    const resultEl = document.getElementById('map-validation-result');
+    const nameInput = document.getElementById(
+      'map-name-input'
+    ) as HTMLInputElement;
+    const name = nameInput?.value.trim() || '未命名地图';
+
+    if (resultEl) {
+      resultEl.className = 'map-validation-result';
+      resultEl.textContent = '验证中...';
+    }
+
+    const result = await this.mapEditor.validateMap(name);
+    if (resultEl) {
+      if (!result) {
+        resultEl.className = 'map-validation-result error';
+        resultEl.textContent = '⚠️ 验证请求超时，请重试';
+      } else if (result.valid) {
+        resultEl.className = 'map-validation-result success';
+        const msgs = ['✅ 地图验证通过！'];
+        if (result.warnings?.length) {
+          msgs.push(...result.warnings.map((w) => `⚠️ ${w}`));
+        }
+        resultEl.innerHTML = msgs.join('<br>');
+      } else {
+        resultEl.className = 'map-validation-result error';
+        resultEl.innerHTML = result.errors
+          .map((e) => `❌ ${e}`)
+          .join('<br>');
+      }
+    }
+  }
+
+  private async saveCurrentMap() {
+    if (!this.mapEditor) return;
+    const resultEl = document.getElementById('map-validation-result');
+    const nameInput = document.getElementById(
+      'map-name-input'
+    ) as HTMLInputElement;
+    const name = nameInput?.value.trim();
+
+    if (!name) {
+      if (resultEl) {
+        resultEl.className = 'map-validation-result error';
+        resultEl.textContent = '❌ 请先输入地图名称';
+      }
+      return;
+    }
+
+    if (resultEl) {
+      resultEl.className = 'map-validation-result';
+      resultEl.textContent = '保存中...';
+    }
+
+    const validateResult = await this.mapEditor.validateMap(name);
+    if (!validateResult || !validateResult.valid) {
+      if (resultEl) {
+        resultEl.className = 'map-validation-result error';
+        const errs = validateResult?.errors || ['验证请求失败'];
+        resultEl.innerHTML = ['请先修复以下问题：', ...errs.map((e) => `❌ ${e}`)].join('<br>');
+      }
+      return;
+    }
+
+    const saved = await this.mapEditor.saveMap(name);
+    if (resultEl) {
+      if (saved) {
+        resultEl.className = 'map-validation-result success';
+        resultEl.innerHTML = `✅ 地图保存成功！<br>地图ID: ${saved.mapId}`;
+        this.refreshSavedMapList();
+        this.refreshLobbyMapList();
+      } else {
+        resultEl.className = 'map-validation-result error';
+        resultEl.textContent = '❌ 地图保存失败，请重试';
+      }
+    }
+  }
+
+  private setRoomMap(customMapId: string | null) {
+    this.network.send({
+      type: 'set_room_map',
+      payload: { roomId: this.roomId, customMapId: customMapId || undefined },
+    });
   }
 }
 
