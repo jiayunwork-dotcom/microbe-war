@@ -224,53 +224,66 @@ class GameController {
       this.requestRoomList();
     });
 
-    document.addEventListener('click', (e) => {
-      const target = e.target as HTMLElement;
-
-      const actionBtn = target.closest('.btn-action') as HTMLElement;
-      if (actionBtn) {
-        const action = actionBtn.dataset.action as ActionType;
+    document.querySelectorAll('.btn-action').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const target = e.currentTarget as HTMLElement;
+        const action = target.dataset.action as ActionType;
         if (action) {
           this.setCurrentAction(action);
         }
-        return;
-      }
+      });
+    });
 
-      const markerBtn = target.closest('.btn-marker') as HTMLElement;
-      if (markerBtn) {
-        const markerType = markerBtn.dataset.marker as MarkerType;
+    document.querySelectorAll('.btn-marker').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const target = e.currentTarget as HTMLElement;
+        const markerType = target.dataset.marker as MarkerType;
         if (markerType) {
           this.toggleMarkerMode(markerType);
         }
-        return;
-      }
+      });
+    });
 
-      const quickPhraseBtn = target.closest('.btn-quick-phrase') as HTMLElement;
-      if (quickPhraseBtn) {
-        const phrase = quickPhraseBtn.dataset.phrase;
+    const waitingInput = document.getElementById('waiting-chat-input') as HTMLInputElement;
+    const waitingSendBtn = document.getElementById('waiting-chat-send');
+    if (waitingInput) {
+      waitingInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.sendChatFromInput('waiting-chat-input');
+        }
+      });
+    }
+    if (waitingSendBtn) {
+      waitingSendBtn.addEventListener('click', () => {
+        this.sendChatFromInput('waiting-chat-input');
+      });
+    }
+
+    const gameInput = document.getElementById('game-chat-input') as HTMLInputElement;
+    const gameSendBtn = document.getElementById('game-chat-send');
+    if (gameInput) {
+      gameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.sendChatFromInput('game-chat-input');
+        }
+      });
+    }
+    if (gameSendBtn) {
+      gameSendBtn.addEventListener('click', () => {
+        this.sendChatFromInput('game-chat-input');
+      });
+    }
+
+    document.querySelectorAll('.btn-quick-phrase').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const target = e.currentTarget as HTMLElement;
+        const phrase = target.dataset.phrase;
         if (phrase) {
           this.sendChatMessage(phrase);
         }
-        return;
-      }
-
-      const sendBtn = target.closest('.chat-send-btn') as HTMLElement;
-      if (sendBtn) {
-        const inputId = sendBtn.dataset.inputId;
-        if (inputId) {
-          this.sendChatFromInput(inputId);
-        }
-        return;
-      }
-    });
-
-    document.addEventListener('keydown', (e) => {
-      const target = e.target as HTMLElement;
-      if (target.classList.contains('chat-input') && e.key === 'Enter') {
-        e.preventDefault();
-        const inputId = target.id;
-        this.sendChatFromInput(inputId);
-      }
+      });
     });
 
     document.getElementById('btn-alliance-accept')?.addEventListener('click', () => {
@@ -304,26 +317,6 @@ class GameController {
       const modal = document.getElementById('alliance-request-modal');
       if (modal) modal.style.display = 'none';
     });
-  }
-
-  private setupChatHandlers(inputId: string, sendBtnId: string, _messagesId: string) {
-    const input = document.getElementById(inputId) as HTMLInputElement;
-    const sendBtn = document.getElementById(sendBtnId);
-
-    if (input) {
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          this.sendChatFromInput(inputId);
-        }
-      });
-    }
-
-    if (sendBtn) {
-      sendBtn.addEventListener('click', () => {
-        this.sendChatFromInput(inputId);
-      });
-    }
   }
 
   private sendChatFromInput(inputId: string) {

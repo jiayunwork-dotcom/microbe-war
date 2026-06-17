@@ -493,6 +493,7 @@ html, body {
   flex-direction: column;
   gap: 12px;
   overflow-y: auto;
+  min-height: 0;
 }
 
 .panel-section {
@@ -661,7 +662,7 @@ html, body {
 
 /* Event log */
 .event-log {
-  max-height: 220px;
+  height: 180px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -836,8 +837,7 @@ html, body {
 }
 
 .chat-messages {
-  max-height: 180px;
-  min-height: 60px;
+  height: 180px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -852,8 +852,7 @@ html, body {
 }
 
 .chat-panel-section .chat-messages {
-  max-height: 140px;
-  min-height: 40px;
+  height: 120px;
 }
 
 .chat-msg {
