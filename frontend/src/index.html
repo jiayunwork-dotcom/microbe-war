@@ -84,6 +84,21 @@
                     <button id="btn-leave-waiting" class="btn btn-secondary">离开房间</button>
                 </div>
                 <p class="waiting-hint">等待房主开始游戏，或观战模式加入</p>
+                <div class="panel-section waiting-chat-section">
+                    <h3>房间聊天</h3>
+                    <div id="waiting-chat-messages" class="chat-messages"></div>
+                    <div class="chat-input-row">
+                        <input type="text" id="waiting-chat-input" class="chat-input" placeholder="输入消息..." maxlength="200">
+                        <button id="waiting-chat-send" class="btn btn-primary btn-small">发送</button>
+                    </div>
+                    <div class="chat-quick-phrases">
+                        <button class="btn btn-small btn-quick-phrase" data-phrase="求联盟">求联盟</button>
+                        <button class="btn btn-small btn-quick-phrase" data-phrase="小心后方">小心后方</button>
+                        <button class="btn btn-small btn-quick-phrase" data-phrase="我要进攻了">我要进攻了</button>
+                        <button class="btn btn-small btn-quick-phrase" data-phrase="帮我挡一下">帮我挡一下</button>
+                        <button class="btn btn-small btn-quick-phrase" data-phrase="GG">GG</button>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -132,6 +147,20 @@
                                         <span class="action-label">进化</span>
                                     </button>
                                 </div>
+                                <div class="marker-buttons">
+                                    <button id="btn-marker-danger" class="btn-marker" data-marker="danger" title="危险区标记">
+                                        <span class="marker-icon danger">❗</span>
+                                        <span class="action-label">危险</span>
+                                    </button>
+                                    <button id="btn-marker-target" class="btn-marker" data-marker="target" title="目标区标记">
+                                        <span class="marker-icon target">🎯</span>
+                                        <span class="action-label">目标</span>
+                                    </button>
+                                    <button id="btn-marker-defense" class="btn-marker" data-marker="defense" title="防御区标记">
+                                        <span class="marker-icon defense">🛡️</span>
+                                        <span class="action-label">防御</span>
+                                    </button>
+                                </div>
                                 <div class="selected-info" id="selected-info">点击培养皿选择菌落</div>
                             </div>
                         </div>
@@ -149,6 +178,22 @@
                             <h3>事件日志</h3>
                             <div id="event-log" class="event-log"></div>
                         </div>
+
+                        <div class="panel-section chat-panel-section">
+                            <h3>房间聊天</h3>
+                            <div id="game-chat-messages" class="chat-messages"></div>
+                            <div class="chat-input-row">
+                                <input type="text" id="game-chat-input" class="chat-input" placeholder="输入消息..." maxlength="200">
+                                <button id="game-chat-send" class="btn btn-primary btn-small">发送</button>
+                            </div>
+                            <div class="chat-quick-phrases">
+                                <button class="btn btn-small btn-quick-phrase" data-phrase="求联盟">求联盟</button>
+                                <button class="btn btn-small btn-quick-phrase" data-phrase="小心后方">小心后方</button>
+                                <button class="btn btn-small btn-quick-phrase" data-phrase="我要进攻了">我要进攻了</button>
+                                <button class="btn btn-small btn-quick-phrase" data-phrase="帮我挡一下">帮我挡一下</button>
+                                <button class="btn btn-small btn-quick-phrase" data-phrase="GG">GG</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -159,6 +204,17 @@
                 <h1 id="result-title">游戏结束</h1>
                 <div id="result-ranking" class="result-ranking"></div>
                 <button id="btn-back-lobby" class="btn btn-primary btn-large">返回大厅</button>
+            </div>
+        </div>
+
+        <div id="alliance-request-modal" class="modal-overlay" style="display:none;">
+            <div class="modal-content">
+                <h3>联盟请求</h3>
+                <p id="alliance-request-text"></p>
+                <div class="modal-actions">
+                    <button id="btn-alliance-accept" class="btn btn-primary">接受</button>
+                    <button id="btn-alliance-reject" class="btn btn-secondary">忽略</button>
+                </div>
             </div>
         </div>
     </div>

@@ -6,6 +6,8 @@ import {
   Player,
   AntibioticType,
   ActionType,
+  TacticalMarker,
+  MarkerType,
 } from './types.js';
 
 export interface RenderAnimation {
@@ -23,6 +25,8 @@ export interface RenderState {
   hoveredCell: Position | null;
   currentAction: ActionType;
   animations: RenderAnimation[];
+  markers: TacticalMarker[];
+  markerMode: MarkerType | null;
 }
 
 const MICROBE_ICONS: Record<string, string> = {
@@ -71,6 +75,8 @@ export class DishRenderer {
       hoveredCell: null,
       currentAction: 'spread',
       animations: [],
+      markers: [],
+      markerMode: null,
     };
 
     this.setupInteraction();
@@ -92,6 +98,31 @@ export class DishRenderer {
 
   setCurrentAction(action: ActionType) {
     this.state.currentAction = action;
+  }
+
+  setMarkers(markers: TacticalMarker[]) {
+    this.state.markers = markers;
+  }
+
+  addMarker(marker: TacticalMarker) {
+    this.state.markers.push(marker);
+  }
+
+  removeMarker(markerId: string) {
+    this.state.markers = this.state.markers.filter((m) => m.id !== markerId);
+  }
+
+  setMarkerMode(mode: MarkerType | null) {
+    this.state.markerMode = mode;
+    if (mode) {
+      this.canvas.style.cursor = 'crosshair';
+    } else {
+      this.canvas.style.cursor = 'crosshair';
+    }
+  }
+
+  getMarkerMode(): MarkerType | null {
+    return this.state.markerMode;
   }
 
   onClick(cb: (pos: Position) => void) {
@@ -193,6 +224,7 @@ export class DishRenderer {
     this.drawAntibioticLayer();
     this.drawTemperatureLayer();
     this.drawColonies();
+    this.drawMarkers();
     this.drawSelectionHighlight();
     this.drawHoverHighlight();
     this.drawActionPreview();
@@ -372,6 +404,86 @@ export class DishRenderer {
     }
 
     if (colony.position.y === 0 && this.state.myPlayerId === colony.playerId && this.state.selectedColonyId === colony.id) {
+    }
+  }
+
+  private drawMarkers() {
+    if (this.state.markers.length === 0 || !this.state.gameState) return;
+    const ctx = this.ctx;
+    const size = this.state.gameState.gridSize;
+
+    for (const marker of this.state.markers) {
+      if (!this.isGridInsideDish(marker.position.x, marker.position.y, size)) continue;
+
+      const screen = this.gridToScreen(marker.position);
+      const markerRadius = this.cellSize * 0.4;
+
+      ctx.save();
+
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, markerRadius + 3, 0, Math.PI * 2);
+      ctx.strokeStyle = marker.color;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+
+      if (marker.type === 'danger') {
+        ctx.beginPath();
+        ctx.arc(screen.x, screen.y, markerRadius * 0.8, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 80, 80, 0.35)';
+        ctx.fill();
+        ctx.strokeStyle = '#ff4444';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = '#ff4444';
+        ctx.font = `bold ${Math.max(10, markerRadius * 0.9)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('!', screen.x, screen.y);
+      } else if (marker.type === 'target') {
+        ctx.beginPath();
+        ctx.arc(screen.x, screen.y, markerRadius * 0.8, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(80, 200, 100, 0.3)';
+        ctx.fill();
+        ctx.strokeStyle = '#44cc66';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(screen.x, screen.y, markerRadius * 0.45, 0, Math.PI * 2);
+        ctx.strokeStyle = '#44cc66';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(screen.x, screen.y, 2, 0, Math.PI * 2);
+        ctx.fillStyle = '#44cc66';
+        ctx.fill();
+      } else if (marker.type === 'defense') {
+        ctx.beginPath();
+        ctx.arc(screen.x, screen.y, markerRadius * 0.8, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(69, 183, 209, 0.3)';
+        ctx.fill();
+        ctx.strokeStyle = '#45B7D1';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        const shieldW = markerRadius * 0.7;
+        const shieldH = markerRadius * 0.85;
+        ctx.beginPath();
+        ctx.moveTo(screen.x, screen.y - shieldH / 2);
+        ctx.quadraticCurveTo(screen.x + shieldW, screen.y - shieldH / 3, screen.x + shieldW * 0.8, screen.y + shieldH * 0.1);
+        ctx.quadraticCurveTo(screen.x + shieldW * 0.4, screen.y + shieldH / 2, screen.x, screen.y + shieldH * 0.6);
+        ctx.quadraticCurveTo(screen.x - shieldW * 0.4, screen.y + shieldH / 2, screen.x - shieldW * 0.8, screen.y + shieldH * 0.1);
+        ctx.quadraticCurveTo(screen.x - shieldW, screen.y - shieldH / 3, screen.x, screen.y - shieldH / 2);
+        ctx.fillStyle = 'rgba(69, 183, 209, 0.5)';
+        ctx.fill();
+        ctx.strokeStyle = '#45B7D1';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+
+      ctx.restore();
     }
   }
 

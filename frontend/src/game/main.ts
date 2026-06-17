@@ -8,6 +8,10 @@ import {
   EventLogEntry,
   Colony,
   PlayerAction,
+  ChatMessage,
+  TacticalMarker,
+  MarkerType,
+  Alliance,
 } from './types.js';
 import { GameWebSocket } from './network.js';
 import { DishRenderer, RenderAnimation } from './renderer.js';
@@ -30,6 +34,9 @@ class GameController {
   private selectedColonyId: string | null = null;
 
   private submitted: boolean = false;
+  private markerMode: MarkerType | null = null;
+  private alliances: Alliance[] = [];
+  private pendingAllianceFrom: string | null = null;
 
   constructor() {
     this.network = new GameWebSocket();
@@ -99,6 +106,9 @@ class GameController {
     this.network.on('turn_result', (payload) => {
       this.gameState = payload.gameState;
       this.submitted = false;
+      if (payload.markers && this.renderer) {
+        this.renderer.setMarkers(payload.markers);
+      }
       this.updateGameScreen();
       this.playTurnAnimations(payload.events || []);
       if (this.gameState!.status === 'finished') {
@@ -125,12 +135,50 @@ class GameController {
       this.roomId = '';
       this.myPlayerId = '';
       this.gameState = null;
+      this.alliances = [];
       this.showScreen('lobby-screen');
       this.requestRoomList();
     });
 
     this.network.on('error', (payload) => {
       this.showLobbyMessage(payload.message || '发生错误', true);
+    });
+
+    this.network.on('chat_message', (payload: ChatMessage) => {
+      this.appendChatMessage(payload);
+    });
+
+    this.network.on('marker_placed', (payload: TacticalMarker) => {
+      if (this.renderer) {
+        this.renderer.addMarker(payload);
+      }
+    });
+
+    this.network.on('marker_removed', (payload: { markerId: string }) => {
+      if (this.renderer) {
+        this.renderer.removeMarker(payload.markerId);
+      }
+    });
+
+    this.network.on('alliance_request_received', (payload) => {
+      this.pendingAllianceFrom = payload.fromPlayerId;
+      const modal = document.getElementById('alliance-request-modal');
+      const text = document.getElementById('alliance-request-text');
+      if (modal && text) {
+        text.innerHTML = `<span style="color:${payload.fromPlayerColor}">${this.escapeHtml(payload.fromPlayerName)}</span> 请求与你结盟`;
+        modal.style.display = 'flex';
+      }
+    });
+
+    this.network.on('alliance_formed', (_payload) => {
+    });
+
+    this.network.on('alliance_broken', (_payload) => {
+    });
+
+    this.network.on('alliances_update', (payload) => {
+      this.alliances = payload.alliances || [];
+      this.updatePlayerStats();
     });
   }
 
@@ -171,6 +219,7 @@ class GameController {
       this.roomId = '';
       this.myPlayerId = '';
       this.gameState = null;
+      this.alliances = [];
       this.showScreen('lobby-screen');
       this.requestRoomList();
     });
@@ -184,6 +233,152 @@ class GameController {
         }
       });
     });
+
+    document.querySelectorAll('.btn-marker').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const target = e.currentTarget as HTMLElement;
+        const markerType = target.dataset.marker as MarkerType;
+        if (markerType) {
+          this.toggleMarkerMode(markerType);
+        }
+      });
+    });
+
+    this.setupChatHandlers('waiting-chat-input', 'waiting-chat-send', 'waiting-chat-messages');
+    this.setupChatHandlers('game-chat-input', 'game-chat-send', 'game-chat-messages');
+
+    document.querySelectorAll('.btn-quick-phrase').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const target = e.currentTarget as HTMLElement;
+        const phrase = target.dataset.phrase;
+        if (phrase) {
+          this.sendChatMessage(phrase);
+        }
+      });
+    });
+
+    document.getElementById('btn-alliance-accept')?.addEventListener('click', () => {
+      if (this.pendingAllianceFrom) {
+        this.network.send({
+          type: 'alliance_respond',
+          payload: {
+            roomId: this.roomId,
+            fromPlayerId: this.pendingAllianceFrom,
+            accept: true,
+          },
+        });
+        this.pendingAllianceFrom = null;
+      }
+      const modal = document.getElementById('alliance-request-modal');
+      if (modal) modal.style.display = 'none';
+    });
+
+    document.getElementById('btn-alliance-reject')?.addEventListener('click', () => {
+      if (this.pendingAllianceFrom) {
+        this.network.send({
+          type: 'alliance_respond',
+          payload: {
+            roomId: this.roomId,
+            fromPlayerId: this.pendingAllianceFrom,
+            accept: false,
+          },
+        });
+        this.pendingAllianceFrom = null;
+      }
+      const modal = document.getElementById('alliance-request-modal');
+      if (modal) modal.style.display = 'none';
+    });
+  }
+
+  private setupChatHandlers(inputId: string, sendBtnId: string, _messagesId: string) {
+    const input = document.getElementById(inputId) as HTMLInputElement;
+    const sendBtn = document.getElementById(sendBtnId);
+
+    if (input) {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.sendChatFromInput(inputId);
+        }
+      });
+    }
+
+    if (sendBtn) {
+      sendBtn.addEventListener('click', () => {
+        this.sendChatFromInput(inputId);
+      });
+    }
+  }
+
+  private sendChatFromInput(inputId: string) {
+    const input = document.getElementById(inputId) as HTMLInputElement;
+    if (!input) return;
+    const text = input.value.trim();
+    if (text) {
+      this.sendChatMessage(text);
+      input.value = '';
+    }
+  }
+
+  private sendChatMessage(content: string) {
+    this.network.send({
+      type: 'send_chat',
+      payload: {
+        roomId: this.roomId,
+        content,
+      },
+    });
+  }
+
+  private appendChatMessage(msg: ChatMessage) {
+    const containers = ['waiting-chat-messages', 'game-chat-messages'];
+    for (const containerId of containers) {
+      const container = document.getElementById(containerId);
+      if (!container) continue;
+
+      const div = document.createElement('div');
+      div.className = 'chat-msg' + (msg.isSystem ? ' system' : '');
+
+      if (msg.isSystem) {
+        div.textContent = msg.content;
+      } else {
+        const time = new Date(msg.timestamp);
+        const timeStr = `${time.getHours().toString().padStart(2, '0')}:${time.getMinutes().toString().padStart(2, '0')}`;
+        div.innerHTML = `<span class="chat-msg-name" style="color:${msg.playerColor}">${this.escapeHtml(msg.playerName)}</span>${this.escapeHtml(msg.content)}<span class="chat-msg-time">${timeStr}</span>`;
+      }
+
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+
+      while (container.children.length > 50) {
+        container.removeChild(container.firstChild!);
+      }
+    }
+  }
+
+  private toggleMarkerMode(markerType: MarkerType) {
+    if (this.markerMode === markerType) {
+      this.markerMode = null;
+    } else {
+      this.markerMode = markerType;
+    }
+
+    if (this.renderer) {
+      this.renderer.setMarkerMode(this.markerMode);
+    }
+
+    document.querySelectorAll('.btn-marker').forEach((b) => {
+      const el = b as HTMLElement;
+      el.classList.toggle('active', el.dataset.marker === this.markerMode);
+    });
+
+    if (this.markerMode) {
+      document.querySelectorAll('.btn-action').forEach((b) => {
+        (b as HTMLElement).classList.remove('active');
+      });
+    } else {
+      this.setCurrentAction(this.currentAction);
+    }
   }
 
   private handleCreateRoom() {
@@ -344,6 +539,7 @@ class GameController {
     waitingEl.innerHTML = this.gameState.players
       .map((p) => {
         const me = p.id === this.myPlayerId ? ' (你)' : '';
+        const isAllied = this.isAlliedWith(p.id);
         return `
       <div class="waiting-player">
         <div class="player-color-dot" style="background:${p.color}"></div>
@@ -352,11 +548,29 @@ class GameController {
           <span class="player-type">${MICROBE_NAMES[p.microbeType]}</span>
           ${p.isHost ? '<span class="player-badge host">房主</span>' : ''}
           ${p.isSpectator ? '<span class="player-badge spec">观战</span>' : ''}
+          ${isAllied ? '<span class="alliance-icon">🤝</span>' : ''}
         </div>
+        ${!p.isSpectator && p.id !== this.myPlayerId ? `<button class="btn-alliance" data-target-id="${p.id}">${isAllied ? '🤝 已结盟' : '请求结盟'}</button>` : ''}
       </div>
     `;
       })
       .join('');
+
+    waitingEl.querySelectorAll('.btn-alliance').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const target = e.currentTarget as HTMLElement;
+        const targetId = target.dataset.targetId;
+        if (targetId && !this.isAlliedWith(targetId)) {
+          this.network.send({
+            type: 'alliance_request',
+            payload: {
+              roomId: this.roomId,
+              targetPlayerId: targetId,
+            },
+          });
+        }
+      });
+    });
 
     const startBtn = document.getElementById('btn-start-game');
     if (startBtn) {
@@ -396,6 +610,11 @@ class GameController {
     const me = this.gameState.players.find((p) => p.id === this.myPlayerId);
     if (!me || me.isSpectator || !me.isAlive) return;
 
+    if (this.markerMode) {
+      this.handleMarkerPlacement(pos);
+      return;
+    }
+
     const colony = this.renderer.getColonyAt(pos);
 
     if (this.selectedColonyId) {
@@ -415,6 +634,26 @@ class GameController {
       this.selectedColonyId = colony.id;
       this.renderer.setSelectedColony(colony.id);
     }
+  }
+
+  private handleMarkerPlacement(pos: Position) {
+    if (!this.markerMode) return;
+    this.network.send({
+      type: 'place_marker',
+      payload: {
+        roomId: this.roomId,
+        markerType: this.markerMode,
+        position: pos,
+      },
+    });
+    this.markerMode = null;
+    if (this.renderer) {
+      this.renderer.setMarkerMode(null);
+    }
+    document.querySelectorAll('.btn-marker').forEach((b) => {
+      (b as HTMLElement).classList.remove('active');
+    });
+    this.setCurrentAction(this.currentAction);
   }
 
   private submitPlayerAction(targetPos: Position) {
@@ -467,6 +706,13 @@ class GameController {
 
   private setCurrentAction(action: ActionType) {
     this.currentAction = action;
+    this.markerMode = null;
+    if (this.renderer) {
+      this.renderer.setMarkerMode(null);
+    }
+    document.querySelectorAll('.btn-marker').forEach((b) => {
+      (b as HTMLElement).classList.remove('active');
+    });
     document.querySelectorAll('.btn-action').forEach((b) => {
       const el = b as HTMLElement;
       el.classList.toggle('active', el.dataset.action === action);
@@ -482,6 +728,12 @@ class GameController {
 
     if (!this.renderer || !this.gameState) {
       info.textContent = '点击培养皿选择菌落';
+      return;
+    }
+
+    if (this.markerMode) {
+      const markerName = this.markerMode === 'danger' ? '危险区' : this.markerMode === 'target' ? '目标区' : '防御区';
+      info.textContent = `标记模式: ${markerName} - 点击格子放置标记`;
       return;
     }
 
@@ -547,6 +799,14 @@ class GameController {
     this.updateActionButtonsState();
   }
 
+  private isAlliedWith(playerId: string): boolean {
+    return this.alliances.some(
+      (a) =>
+        (a.playerId1 === this.myPlayerId && a.playerId2 === playerId) ||
+        (a.playerId1 === playerId && a.playerId2 === this.myPlayerId)
+    );
+  }
+
   private updatePlayerStats() {
     if (!this.gameState) return;
     const statsEl = document.getElementById('player-stats');
@@ -565,17 +825,26 @@ class GameController {
         const bar = p.isSpectator
           ? 0
           : Math.min(100, p.weightedArea);
+        const isAllied = this.isAlliedWith(p.id);
+        const canRequestAlliance = !p.isSpectator && p.id !== this.myPlayerId && p.isAlive && !isAllied;
+        const myAllianceCount = this.alliances.filter(
+          (a) => a.playerId1 === this.myPlayerId || a.playerId2 === this.myPlayerId
+        ).length;
+        const allyCount = this.alliances.filter(
+          (a) => a.playerId1 === p.id || a.playerId2 === p.id
+        ).length;
         return `
         <div class="stat-item ${p.id === this.myPlayerId ? 'me' : ''}">
           <div class="stat-row">
             <span class="stat-rank">#${idx + 1}</span>
             <span class="stat-color" style="background:${p.color}"></span>
-            <span class="stat-name">${this.escapeHtml(p.name)}${me}</span>
+            <span class="stat-name">${this.escapeHtml(p.name)}${me}${isAllied ? ' 🤝' : ''}</span>
             <span class="stat-badge badge-type">${MICROBE_NAMES[p.microbeType].split(' ')[0]}</span>
           </div>
           <div class="stat-row stat-area">
             <span>面积: ${p.totalArea}</span>
             <span>加权: ${p.weightedArea.toFixed(1)}</span>
+            ${canRequestAlliance && myAllianceCount < 2 && allyCount < 2 ? `<button class="btn-alliance" data-target-id="${p.id}">结盟</button>` : ''}
           </div>
           ${!p.isSpectator ? `
           <div class="stat-bar">
@@ -588,6 +857,23 @@ class GameController {
       `;
       })
       .join('');
+
+    statsEl.querySelectorAll('.btn-alliance').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const target = e.currentTarget as HTMLElement;
+        const targetId = target.dataset.targetId;
+        if (targetId) {
+          this.network.send({
+            type: 'alliance_request',
+            payload: {
+              roomId: this.roomId,
+              targetPlayerId: targetId,
+            },
+          });
+        }
+      });
+    });
   }
 
   private updateSubmitStatus() {
@@ -628,6 +914,9 @@ class GameController {
     const me = this.gameState.players.find((p) => p.id === this.myPlayerId);
     const disabled = !me || me.isSpectator || !me.isAlive || this.submitted;
     document.querySelectorAll('.btn-action').forEach((b) => {
+      (b as HTMLButtonElement).disabled = disabled;
+    });
+    document.querySelectorAll('.btn-marker').forEach((b) => {
       (b as HTMLButtonElement).disabled = disabled;
     });
   }
@@ -710,11 +999,12 @@ class GameController {
         if (!player) return '';
         const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`;
         const meMark = player.id === this.myPlayerId ? ' (你)' : '';
+        const isAllied = this.isAlliedWith(player.id);
         return `
         <div class="rank-item rank-${idx} ${player.id === this.myPlayerId ? 'me' : ''}">
           <span class="rank-medal">${medal}</span>
           <span class="rank-color" style="background:${player.color}"></span>
-          <span class="rank-name">${this.escapeHtml(player.name)}${meMark}</span>
+          <span class="rank-name">${this.escapeHtml(player.name)}${meMark}${isAllied ? ' 🤝' : ''}</span>
           <span class="rank-microbe">${MICROBE_NAMES[player.microbeType]}</span>
           <span class="rank-area">领地: ${r.area}</span>
           <span class="rank-weighted">加权: ${r.weightedArea.toFixed(1)}</span>

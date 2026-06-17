@@ -7,6 +7,7 @@ import {
   MicrobeType,
   PlayerAction,
   Player,
+  MarkerType,
 } from '../game/types';
 import { createPlayer } from '../game/engine';
 
@@ -249,6 +250,85 @@ export function setupWebSocketHandlers(
             type: 'spectator_toggled',
             payload: res,
           });
+          break;
+        }
+
+        case 'send_chat': {
+          const { roomId, content }: { roomId: string; content: string } = msg.payload || {};
+          const c = roomManager.getClient(cid);
+          const actualRoomId = roomId || c?.roomId;
+          if (!actualRoomId) {
+            return sendError(cid, '未在房间中');
+          }
+          if (!content || typeof content !== 'string' || content.trim().length === 0) {
+            return sendError(cid, '消息不能为空');
+          }
+          if (content.length > 200) {
+            return sendError(cid, '消息过长');
+          }
+          const chatMsg = roomManager.sendChatMessage(cid, actualRoomId, content.trim());
+          if (!chatMsg) {
+            return sendError(cid, '发送消息失败');
+          }
+          break;
+        }
+
+        case 'place_marker': {
+          const {
+            roomId,
+            markerType,
+            position,
+          }: { roomId: string; markerType: MarkerType; position: { x: number; y: number } } = msg.payload || {};
+          const c = roomManager.getClient(cid);
+          const actualRoomId = roomId || c?.roomId;
+          if (!actualRoomId) {
+            return sendError(cid, '未在房间中');
+          }
+          if (!markerType || !position) {
+            return sendError(cid, '缺少标记参数');
+          }
+          const marker = roomManager.placeMarker(cid, actualRoomId, markerType, position);
+          if (!marker) {
+            return sendError(cid, '放置标记失败');
+          }
+          break;
+        }
+
+        case 'alliance_request': {
+          const { roomId, targetPlayerId }: { roomId: string; targetPlayerId: string } = msg.payload || {};
+          const c = roomManager.getClient(cid);
+          const actualRoomId = roomId || c?.roomId;
+          if (!actualRoomId) {
+            return sendError(cid, '未在房间中');
+          }
+          if (!targetPlayerId) {
+            return sendError(cid, '缺少目标玩家ID');
+          }
+          const ok = roomManager.requestAlliance(cid, actualRoomId, targetPlayerId);
+          if (!ok) {
+            return sendError(cid, '联盟请求失败');
+          }
+          break;
+        }
+
+        case 'alliance_respond': {
+          const {
+            roomId,
+            fromPlayerId,
+            accept,
+          }: { roomId: string; fromPlayerId: string; accept: boolean } = msg.payload || {};
+          const c = roomManager.getClient(cid);
+          const actualRoomId = roomId || c?.roomId;
+          if (!actualRoomId) {
+            return sendError(cid, '未在房间中');
+          }
+          if (!fromPlayerId) {
+            return sendError(cid, '缺少请求者ID');
+          }
+          const ok = roomManager.respondAlliance(cid, actualRoomId, fromPlayerId, accept);
+          if (!ok) {
+            return sendError(cid, '联盟响应失败');
+          }
           break;
         }
 

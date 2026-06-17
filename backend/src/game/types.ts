@@ -136,6 +136,32 @@ export interface RoomInfo {
   turn?: number;
 }
 
+export type MarkerType = 'danger' | 'target' | 'defense';
+
+export interface TacticalMarker {
+  id: string;
+  playerId: string;
+  type: MarkerType;
+  position: Position;
+  placedTurn: number;
+  color: string;
+}
+
+export interface Alliance {
+  playerId1: string;
+  playerId2: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  playerId: string;
+  playerName: string;
+  playerColor: string;
+  content: string;
+  timestamp: number;
+  isSystem: boolean;
+}
+
 export type ClientMessageType =
   | 'create_room'
   | 'join_room'
@@ -145,7 +171,11 @@ export type ClientMessageType =
   | 'submit_turn'
   | 'request_rooms'
   | 'toggle_spectator'
-  | 'ping';
+  | 'ping'
+  | 'send_chat'
+  | 'place_marker'
+  | 'alliance_request'
+  | 'alliance_respond';
 
 export type ServerMessageType =
   | 'room_created'
@@ -162,7 +192,14 @@ export type ServerMessageType =
   | 'game_ended'
   | 'error'
   | 'pong'
-  | 'spectator_toggled';
+  | 'spectator_toggled'
+  | 'chat_message'
+  | 'marker_placed'
+  | 'marker_removed'
+  | 'alliance_request_received'
+  | 'alliance_formed'
+  | 'alliance_broken'
+  | 'alliances_update';
 
 export interface ClientMessage {
   type: ClientMessageType;
