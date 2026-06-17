@@ -77,7 +77,7 @@ class GameController {
   private cachedMaps: MapListItem[] = [];
 
   constructor() {
-    this.network = new GameWebSocket('ws://localhost:3001/ws');
+    this.network = new GameWebSocket();
   }
 
   async init() {

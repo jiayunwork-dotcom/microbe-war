@@ -545,23 +545,34 @@ export class MapEditor {
       }
     }
 
-    const corners = [
-      { x: center - diamondRadius + 2, y: center - diamondRadius + 2 },
-      { x: center + diamondRadius - 2, y: center - diamondRadius + 2 },
-      { x: center - diamondRadius + 2, y: center + diamondRadius - 2 },
-      { x: center + diamondRadius - 2, y: center + diamondRadius - 2 },
+    const spawnOffsets = [
+      { dx: -9, dy: 0 },
+      { dx: 9, dy: 0 },
+      { dx: 0, dy: -9 },
+      { dx: 0, dy: 9 },
+      { dx: -6, dy: -6 },
+      { dx: 6, dy: 6 },
     ];
-    for (const c of corners) {
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const nx = c.x + dx;
-          const ny = c.y + dy;
+
+    const spawnPoints: Position[] = spawnOffsets.map((offset) => ({
+      x: center + offset.dx,
+      y: center + offset.dy,
+    }));
+
+    for (const sp of spawnPoints) {
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const nx = sp.x + dx;
+          const ny = sp.y + dy;
           if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
-            this.terrain[ny][nx] = 'normal';
+            const dist = Math.abs(nx - center) + Math.abs(ny - center);
+            if (dist <= diamondRadius) {
+              this.terrain[ny][nx] = 'normal';
+            }
           }
         }
       }
-      this.spawnPoints.push({ x: c.x, y: c.y });
+      this.spawnPoints.push(sp);
     }
 
     const highNutrientRadius = 4;
